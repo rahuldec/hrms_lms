@@ -1,0 +1,362 @@
+import React, { useEffect, useMemo, useState, useRef } from "react";
+import { useAuth } from "@/context/AuthContext";
+import { supabase } from "@/lib/supabaseClient";
+import { fetchSheetModules } from "@/lib/sheet";
+import AppShell from "@/components/AppShell";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import {
+  CheckCircle2,
+  Circle,
+  FileText,
+  Play,
+  Clock,
+  ChevronRight,
+  Loader2,
+} from "lucide-react";
+import { toast } from "sonner";
+
+const fmt = (sec) => {
+  const m = Math.floor((sec || 0) / 60);
+  const s = Math.floor((sec || 0) % 60);
+  return `${m}m ${s.toString().padStart(2, "0")}s`;
+};
+
+const navItems = [{ to: "/trainee", label: "Training", testId: "nav-training" }];
+
+export default function TraineeHome() {
+  const { trainee } = useAuth();
+  const [modules, setModules] = useState([]);
+  const [progress, setProgress] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [activeLesson, setActiveLesson] = useState(null);
+  const tickRef = useRef(null);
+  const tickStartRef = useRef(null);
+
+  const reloadProgress = async () => {
+    if (!trainee) return;
+    const { data } = await supabase
+      .from("lesson_progress")
+      .select("*")
+      .eq("trainee_id", trainee.id);
+    const map = {};
+    (data || []).forEach((p) => (map[p.lesson_id] = p));
+    setProgress(map);
+  };
+
+  useEffect(() => {
+    if (!trainee) return;
+    (async () => {
+      try {
+        const [mods] = await Promise.all([fetchSheetModules(), reloadProgress()]);
+        setModules(mods);
+      } catch (e) {
+        toast.error("Could not load training content");
+      } finally {
+        setLoading(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trainee?.id]);
+
+  const stats = useMemo(() => {
+    const lessons = modules.flatMap((m) => m.lessons.filter((l) => l.kind === "video"));
+    const total = lessons.length;
+    const watched = lessons.filter((l) => progress[l.id]?.watched).length;
+    const seconds = Object.values(progress).reduce(
+      (acc, p) => acc + (p.watch_seconds || 0),
+      0
+    );
+    return { total, watched, seconds, pct: total ? (watched / total) * 100 : 0 };
+  }, [modules, progress]);
+
+  const upsertProgress = async (lesson, patch) => {
+    if (!trainee) return;
+    const existing = progress[lesson.id];
+    const payload = {
+      trainee_id: trainee.id,
+      lesson_id: lesson.id,
+      watched: existing?.watched || false,
+      watch_seconds: existing?.watch_seconds || 0,
+      ...patch,
+      updated_at: new Date().toISOString(),
+    };
+    let result;
+    if (existing?.id) {
+      result = await supabase
+        .from("lesson_progress")
+        .update(payload)
+        .eq("id", existing.id)
+        .select()
+        .single();
+    } else {
+      result = await supabase
+        .from("lesson_progress")
+        .insert(payload)
+        .select()
+        .single();
+    }
+    if (result.data) {
+      setProgress((prev) => ({ ...prev, [lesson.id]: result.data }));
+    }
+  };
+
+  // Auto-tracking timer while a video lesson is open
+  const startTimer = (lesson) => {
+    stopTimer(); // ensure single
+    tickStartRef.current = { lessonId: lesson.id, startedAt: Date.now() };
+    tickRef.current = setInterval(async () => {
+      const ref = tickStartRef.current;
+      if (!ref) return;
+      const delta = Math.floor((Date.now() - ref.startedAt) / 1000);
+      if (delta < 5) return;
+      tickStartRef.current = { ...ref, startedAt: Date.now() };
+      const currentSeconds = progress[ref.lessonId]?.watch_seconds || 0;
+      await upsertProgress({ id: ref.lessonId }, {
+        watch_seconds: currentSeconds + delta,
+      });
+    }, 5000);
+  };
+
+  const stopTimer = async () => {
+    if (tickRef.current) {
+      clearInterval(tickRef.current);
+      tickRef.current = null;
+    }
+    const ref = tickStartRef.current;
+    if (ref) {
+      const delta = Math.floor((Date.now() - ref.startedAt) / 1000);
+      if (delta > 0) {
+        const currentSeconds = progress[ref.lessonId]?.watch_seconds || 0;
+        await upsertProgress({ id: ref.lessonId }, {
+          watch_seconds: currentSeconds + delta,
+        });
+      }
+      tickStartRef.current = null;
+    }
+  };
+
+  useEffect(() => () => stopTimer(), []); // cleanup on unmount
+
+  const openLesson = (lesson) => {
+    if (lesson.kind === "assignment" && lesson.assignmentUrl) {
+      window.open(lesson.assignmentUrl, "_blank");
+      return;
+    }
+    if (lesson.kind === "video" && !lesson.videoEmbedUrl) {
+      toast.info("No video link for this lesson");
+      return;
+    }
+    setActiveLesson(lesson);
+    if (lesson.kind === "video") startTimer(lesson);
+  };
+
+  const closeLesson = async () => {
+    await stopTimer();
+    setActiveLesson(null);
+  };
+
+  const toggleWatched = async (lesson) => {
+    const existing = progress[lesson.id];
+    await upsertProgress(lesson, { watched: !existing?.watched });
+    toast.success(existing?.watched ? "Marked as unwatched" : "Marked as watched");
+  };
+
+  if (loading) {
+    return (
+      <AppShell navItems={navItems} subtitle="Trainee">
+        <div className="min-h-[40vh] grid place-items-center">
+          <Loader2 className="h-6 w-6 animate-spin text-neutral-400" />
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (!trainee) {
+    return (
+      <AppShell navItems={navItems} subtitle="Trainee">
+        <Card className="p-8 rounded-2xl">
+          <p className="text-neutral-700">
+            Your trainee profile is not set up yet. Please reach out to your HR
+            to be added to the program.
+          </p>
+        </Card>
+      </AppShell>
+    );
+  }
+
+  return (
+    <AppShell navItems={navItems} subtitle="Trainee">
+      <div className="mb-8">
+        <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">
+          Welcome back
+        </p>
+        <h1 className="text-4xl font-semibold mt-1 tracking-tight">
+          Hi, {trainee.name?.split(" ")[0]}.
+        </h1>
+        <p className="text-neutral-500 mt-2 max-w-xl">
+          Your Okie Dokie ERP training program — modules, video lessons and
+          assignments, all in one place.
+        </p>
+      </div>
+
+      <Card className="rounded-2xl border-neutral-200/80 p-7 mb-10">
+        <div className="flex items-baseline justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">
+              Overall progress
+            </p>
+            <p
+              className="text-5xl font-semibold mt-2 tabular-nums"
+              data-testid="overall-progress-value"
+            >
+              {stats.watched}
+              <span className="text-neutral-300 text-3xl">/{stats.total}</span>
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-sm text-neutral-500 inline-flex items-center gap-2">
+              <Clock className="h-4 w-4" /> Watch time
+            </p>
+            <p className="text-lg font-medium mt-1">{fmt(stats.seconds)}</p>
+          </div>
+        </div>
+        <div className="h-2 bg-neutral-100 rounded-full overflow-hidden mt-6">
+          <div
+            data-testid="overall-progress-bar"
+            className="h-full rounded-full transition-all"
+            style={{ width: `${stats.pct}%`, backgroundColor: "#E05A2B" }}
+          />
+        </div>
+      </Card>
+
+      <div className="space-y-8">
+        {modules.map((mod) => {
+          const modLessons = mod.lessons.filter((l) => l.kind === "video");
+          const modWatched = modLessons.filter((l) => progress[l.id]?.watched).length;
+          return (
+            <section key={mod.id} data-testid={`module-${mod.order}`}>
+              <div className="flex items-baseline justify-between mb-3">
+                <h2 className="text-xl font-semibold tracking-tight">
+                  <span className="text-neutral-400 mr-2">
+                    {String(mod.order).padStart(2, "0")}
+                  </span>
+                  {mod.name}
+                </h2>
+                <span className="text-xs text-neutral-500">
+                  {modWatched} / {modLessons.length} watched
+                </span>
+              </div>
+              <Card className="rounded-2xl border-neutral-200/80 overflow-hidden">
+                <ul className="divide-y divide-neutral-100">
+                  {mod.lessons.map((l) => {
+                    const p = progress[l.id];
+                    const watched = !!p?.watched;
+                    return (
+                      <li
+                        key={l.id}
+                        data-testid={`lesson-${l.id}`}
+                        className="px-5 py-4 flex items-center gap-4 hover:bg-neutral-50/60 cursor-pointer transition-colors"
+                        onClick={() => openLesson(l)}
+                      >
+                        {l.kind === "video" ? (
+                          watched ? (
+                            <CheckCircle2
+                              className="h-5 w-5 flex-shrink-0"
+                              style={{ color: "#E05A2B" }}
+                            />
+                          ) : (
+                            <Circle className="h-5 w-5 text-neutral-300 flex-shrink-0" />
+                          )
+                        ) : l.kind === "assignment" ? (
+                          <FileText className="h-5 w-5 text-amber-600 flex-shrink-0" />
+                        ) : (
+                          <Circle className="h-5 w-5 text-neutral-200 flex-shrink-0" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-neutral-900 truncate">
+                            {l.title}
+                          </p>
+                          <p className="text-xs text-neutral-500 mt-0.5">
+                            {l.day}
+                            {l.kind === "assignment" && " · Assignment PDF"}
+                            {l.kind === "review" && " · Review"}
+                            {p?.watch_seconds
+                              ? ` · ${fmt(p.watch_seconds)} watched`
+                              : ""}
+                          </p>
+                        </div>
+                        {l.kind === "video" && l.videoEmbedUrl && (
+                          <Play className="h-4 w-4 text-neutral-400" />
+                        )}
+                        {l.kind === "assignment" && l.assignmentUrl && (
+                          <FileText className="h-4 w-4 text-neutral-400" />
+                        )}
+                        <ChevronRight className="h-4 w-4 text-neutral-300" />
+                      </li>
+                    );
+                  })}
+                </ul>
+              </Card>
+            </section>
+          );
+        })}
+      </div>
+
+      {activeLesson && (
+        <div
+          data-testid="video-modal"
+          className="fixed inset-0 z-50 bg-neutral-900/70 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={closeLesson}
+        >
+          <div
+            className="bg-white rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 flex items-center justify-between border-b border-neutral-100">
+              <div className="min-w-0">
+                <p className="text-xs text-neutral-500 mb-0.5">
+                  {activeLesson.moduleName} · {activeLesson.day}
+                </p>
+                <p className="font-semibold truncate">{activeLesson.title}</p>
+              </div>
+              <Button
+                data-testid="close-video"
+                variant="ghost"
+                onClick={closeLesson}
+                className="rounded-full"
+              >
+                Close
+              </Button>
+            </div>
+            <div className="aspect-video bg-black">
+              <iframe
+                title={activeLesson.title}
+                src={activeLesson.videoEmbedUrl}
+                allow="autoplay; encrypted-media"
+                allowFullScreen
+                className="w-full h-full"
+              />
+            </div>
+            <div className="px-6 py-4 flex items-center justify-between bg-white">
+              <div className="text-sm text-neutral-600 flex items-center gap-2">
+                <Clock className="h-4 w-4" />
+                {fmt(progress[activeLesson.id]?.watch_seconds || 0)} watched
+              </div>
+              <Button
+                data-testid="toggle-watched"
+                onClick={() => toggleWatched(activeLesson)}
+                className="rounded-full text-white"
+                style={{ backgroundColor: "#E05A2B" }}
+              >
+                {progress[activeLesson.id]?.watched
+                  ? "Mark as unwatched"
+                  : "Mark as watched"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </AppShell>
+  );
+}

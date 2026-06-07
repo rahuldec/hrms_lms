@@ -1,0 +1,16 @@
+.App {
+    min-height: 100vh;
+    background: #ffffff;
+}
+
+::selection {
+    background: #e05a2b;
+    color: #fff;
+}
+
+input,
+button,
+textarea,
+select {
+    font-family: inherit;
+}
