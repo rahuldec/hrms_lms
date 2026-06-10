@@ -5,8 +5,9 @@ import { fetchSheetModules } from "@/lib/sheet";
 import AppShell from "@/components/AppShell";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, CheckCircle2, Circle, Clock } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Circle, Clock, XCircle } from "lucide-react";
 import { toast } from "sonner";
+import Papa from "papaparse";
 
 const navItems = [
   { to: "/admin", label: "Dashboard", testId: "nav-dashboard" },
@@ -19,11 +20,43 @@ const fmtMinutes = (sec) => {
   return `${m}m ${s.toString().padStart(2, "0")}s`;
 };
 
+const SIS_CSV_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRdhlvmjnqv5YBTpK4oxX914j6HApyK26brmNyqqkIoKGDLJUPyigKBLOlgB4msgfEacRqTuDZtsU3C/pub?output=csv";
+
+const SKIP_COLS = ["Added Time", "IP Address", "Name", "Overall Score", "Link"];
+
+const fetchSISResult = async (traineeName) => {
+  try {
+    const res = await fetch(SIS_CSV_URL, { cache: "no-store" });
+    if (!res.ok) return null;
+    const text = await res.text();
+    const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+
+    const row = parsed.data.find(
+      (r) =>
+        (r["Name"] || "").trim().toLowerCase() ===
+        traineeName.trim().toLowerCase()
+    );
+
+    if (!row) return null;
+
+    const questions = parsed.meta.fields.filter(
+      (f) => !SKIP_COLS.includes(f)
+    );
+
+    return { row, questions };
+  } catch {
+    return null;
+  }
+};
+
 export default function TraineeDetail() {
   const { id } = useParams();
   const [trainee, setTrainee] = useState(null);
   const [progress, setProgress] = useState([]);
   const [modules, setModules] = useState([]);
+  const [sisResult, setSisResult] = useState(null);
+  const [sisLoading, setSisLoading] = useState(true);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -36,10 +69,16 @@ export default function TraineeDetail() {
         setTrainee(tRes.trainee || null);
         setProgress(tRes.progress || []);
         setModules(mods || []);
+
+        if (tRes.trainee?.name) {
+          const sis = await fetchSISResult(tRes.trainee.name);
+          setSisResult(sis);
+        }
       } catch (e) {
         toast.error("Failed to load trainee");
       } finally {
         setLoading(false);
+        setSisLoading(false);
       }
     })();
   }, [id]);
@@ -58,10 +97,12 @@ export default function TraineeDetail() {
       ),
     [modules]
   );
+
   const watchedCount = useMemo(
     () => progress.filter((p) => p.watched).length,
     [progress]
   );
+
   const totalSeconds = useMemo(
     () => progress.reduce((acc, p) => acc + (p.watch_seconds || 0), 0),
     [progress]
@@ -74,6 +115,7 @@ export default function TraineeDetail() {
       </AppShell>
     );
   }
+
   if (!trainee) {
     return (
       <AppShell navItems={navItems} subtitle="Admin">
@@ -81,6 +123,12 @@ export default function TraineeDetail() {
       </AppShell>
     );
   }
+
+  const sisScore = sisResult
+    ? parseFloat(sisResult.row["Overall Score"] || 0)
+    : null;
+  const sisTotal = sisResult ? sisResult.questions.length : 15;
+  const sisLink = sisResult ? sisResult.row["Link"] : null;
 
   return (
     <AppShell navItems={navItems} subtitle="Admin">
@@ -94,6 +142,7 @@ export default function TraineeDetail() {
       </Link>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        {/* Trainee Info Card */}
         <Card className="lg:col-span-2 rounded-2xl border-neutral-200/80 p-7">
           <div className="flex items-start justify-between">
             <div>
@@ -116,27 +165,19 @@ export default function TraineeDetail() {
           </div>
           <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
             <div>
-              <p className="text-xs uppercase tracking-wider text-neutral-500">
-                Status
-              </p>
+              <p className="text-xs uppercase tracking-wider text-neutral-500">Status</p>
               <p className="mt-1 font-medium">{trainee.status || "—"}</p>
             </div>
             <div>
-              <p className="text-xs uppercase tracking-wider text-neutral-500">
-                Manager
-              </p>
+              <p className="text-xs uppercase tracking-wider text-neutral-500">Manager</p>
               <p className="mt-1 font-medium">{trainee.manager || "—"}</p>
             </div>
             <div>
-              <p className="text-xs uppercase tracking-wider text-neutral-500">
-                Joined
-              </p>
+              <p className="text-xs uppercase tracking-wider text-neutral-500">Joined</p>
               <p className="mt-1 font-medium">{trainee.join_date || "—"}</p>
             </div>
             <div>
-              <p className="text-xs uppercase tracking-wider text-neutral-500">
-                Phone
-              </p>
+              <p className="text-xs uppercase tracking-wider text-neutral-500">Phone</p>
               <p className="mt-1 font-medium">{trainee.phone || "—"}</p>
             </div>
           </div>
@@ -147,34 +188,134 @@ export default function TraineeDetail() {
           )}
         </Card>
 
-        <Card className="rounded-2xl border-neutral-200/80 p-7">
-          <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">
-            Progress
-          </p>
-          <p className="text-4xl font-semibold mt-2 tabular-nums">
-            {watchedCount}
-            <span className="text-neutral-300 text-2xl">/{totalLessons}</span>
-          </p>
-          <p className="text-sm text-neutral-500 mt-1">lessons watched</p>
-          <div className="h-2 bg-neutral-100 rounded-full overflow-hidden mt-5">
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${
-                  totalLessons ? (watchedCount / totalLessons) * 100 : 0
-                }%`,
-                backgroundColor: "#E05A2B",
-              }}
-            />
-          </div>
-          <div className="mt-6 flex items-center gap-2 text-sm text-neutral-600">
-            <Clock className="h-4 w-4 text-neutral-400" />
-            Total watch time:{" "}
-            <span className="font-medium">{fmtMinutes(totalSeconds)}</span>
-          </div>
-        </Card>
+        {/* Right column — Progress + SIS Score */}
+        <div className="flex flex-col gap-6">
+          {/* Video Progress */}
+          <Card className="rounded-2xl border-neutral-200/80 p-7">
+            <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">
+              Progress
+            </p>
+            <p className="text-4xl font-semibold mt-2 tabular-nums">
+              {watchedCount}
+              <span className="text-neutral-300 text-2xl">/{totalLessons}</span>
+            </p>
+            <p className="text-sm text-neutral-500 mt-1">lessons watched</p>
+            <div className="h-2 bg-neutral-100 rounded-full overflow-hidden mt-5">
+              <div
+                className="h-full rounded-full"
+                style={{
+                  width: `${totalLessons ? (watchedCount / totalLessons) * 100 : 0}%`,
+                  backgroundColor: "#E05A2B",
+                }}
+              />
+            </div>
+            <div className="mt-6 flex items-center gap-2 text-sm text-neutral-600">
+              <Clock className="h-4 w-4 text-neutral-400" />
+              Total watch time:{" "}
+              <span className="font-medium">{fmtMinutes(totalSeconds)}</span>
+            </div>
+          </Card>
+
+          {/* SIS Assignment Score */}
+          <Card className="rounded-2xl border-neutral-200/80 p-7">
+            <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">
+              SIS Assignment
+            </p>
+            {sisLoading ? (
+              <p className="text-sm text-neutral-400 mt-2">Loading...</p>
+            ) : sisScore !== null ? (
+              <>
+                <p className="text-4xl font-semibold mt-2 tabular-nums">
+                  {sisScore}
+                  <span className="text-neutral-300 text-2xl">/{sisTotal}</span>
+                </p>
+                <div className="h-2 bg-neutral-100 rounded-full overflow-hidden mt-4">
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${(sisScore / sisTotal) * 100}%`,
+                      backgroundColor:
+                        sisScore / sisTotal >= 0.7
+                          ? "#16a34a"
+                          : sisScore / sisTotal >= 0.5
+                          ? "#d97706"
+                          : "#dc2626",
+                    }}
+                  />
+                </div>
+                <p
+                  className="text-sm mt-3 font-medium"
+                  style={{
+                    color:
+                      sisScore / sisTotal >= 0.7
+                        ? "#16a34a"
+                        : sisScore / sisTotal >= 0.5
+                        ? "#d97706"
+                        : "#dc2626",
+                  }}
+                >
+                  {sisScore / sisTotal >= 0.7 ? "✓ Pass" : "✗ Needs Improvement"}
+                </p>
+                {sisLink && (
+                  
+                    href={sisLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-600 hover:underline mt-2 inline-block"
+                  >
+                    View submission →
+                  </a>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-neutral-400 mt-2">Not attempted yet</p>
+            )}
+          </Card>
+        </div>
       </div>
 
+      {/* SIS Question-wise Breakdown */}
+      {sisResult && (
+        <Card className="rounded-2xl border-neutral-200/80 p-7 mb-6">
+          <h2 className="text-xl font-semibold mb-1">
+            SIS Assignment — Question Breakdown
+          </h2>
+          <p className="text-sm text-neutral-500 mb-6">
+            Question-wise responses for the SIS module assignment.
+          </p>
+          <ul className="divide-y divide-neutral-100 border border-neutral-100 rounded-xl overflow-hidden">
+            {sisResult.questions.map((q, i) => {
+              const ans = (sisResult.row[q] || "").trim().toLowerCase();
+              const correct = ans === "yes";
+              return (
+                <li
+                  key={i}
+                  className="px-4 py-3 flex items-start gap-3 text-sm"
+                >
+                  {correct ? (
+                    <CheckCircle2
+                      className="h-4 w-4 flex-shrink-0 mt-0.5"
+                      style={{ color: "#16a34a" }}
+                    />
+                  ) : (
+                    <XCircle className="h-4 w-4 flex-shrink-0 mt-0.5 text-red-500" />
+                  )}
+                  <p className="flex-1 text-neutral-700">{q}</p>
+                  <span
+                    className={`text-xs font-medium ${
+                      correct ? "text-green-600" : "text-red-500"
+                    }`}
+                  >
+                    {correct ? "Yes" : "No"}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+      )}
+
+      {/* Lesson Activity */}
       <Card className="rounded-2xl border-neutral-200/80 p-7">
         <h2 className="text-xl font-semibold mb-1">Lesson activity</h2>
         <p className="text-sm text-neutral-500 mb-6">
