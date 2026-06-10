@@ -4,6 +4,13 @@
 .idea/
 .vscode/
 
+# Environment files (contain secrets — never commit)
+.env
+backend/.env
+frontend/.env
+**/.env
+!.env.example
+
 # Dependencies
 node_modules/
 /node_modules
