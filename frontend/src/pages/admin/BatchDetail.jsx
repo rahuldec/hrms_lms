@@ -1,0 +1,273 @@
+import React, { useEffect, useState, useMemo } from "react";
+import { Link, useParams } from "react-router-dom";
+import { api } from "@/lib/api";
+import { fetchSheetModules } from "@/lib/sheet";
+import AppShell from "@/components/AppShell";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ArrowLeft, CheckCircle2, Clock, TrendingUp } from "lucide-react";
+import { toast } from "sonner";
+
+const navItems = [
+  { to: "/admin", label: "Dashboard", testId: "nav-dashboard" },
+  { to: "/admin/trainees", label: "Trainees", testId: "nav-trainees" },
+  { to: "/admin/batches", label: "Batches", testId: "nav-batches" },
+];
+
+const fmtMinutes = (sec) => {
+  const m = Math.floor((sec || 0) / 60);
+  const s = Math.floor((sec || 0) % 60);
+  return `${m}m ${s.toString().padStart(2, "0")}s`;
+};
+
+const statusBadge = (s) => {
+  const map = {
+    Active: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+    Completed: "bg-blue-50 text-blue-700 ring-blue-200",
+    "On Hold": "bg-amber-50 text-amber-700 ring-amber-200",
+  };
+  return map[s] || "bg-neutral-100 text-neutral-600 ring-neutral-200";
+};
+
+export default function BatchDetail() {
+  const { id } = useParams();
+  const [batch, setBatch] = useState(null);
+  const [trainees, setTrainees] = useState([]);
+  const [progressMap, setProgressMap] = useState({});
+  const [modules, setModules] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [promotingId, setPromotingId] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [bRes, mods] = await Promise.all([
+          api.getBatch(id),
+          fetchSheetModules().catch(() => []),
+        ]);
+        setBatch(bRes.batch || null);
+        setTrainees(bRes.trainees || []);
+        setModules(mods || []);
+
+        // fetch progress for each trainee
+        const pm = {};
+        await Promise.all(
+          (bRes.trainees || []).map(async (t) => {
+            try {
+              const res = await api.getTrainee(t.id);
+              pm[t.id] = res.progress || [];
+            } catch {
+              pm[t.id] = [];
+            }
+          })
+        );
+        setProgressMap(pm);
+      } catch (e) {
+        toast.error("Failed to load batch");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [id]);
+
+  const totalLessons = useMemo(
+    () =>
+      modules.reduce(
+        (acc, m) => acc + m.lessons.filter((l) => l.kind === "video").length,
+        0
+      ),
+    [modules]
+  );
+
+  const promote = async (t) => {
+    const next = (t.current_level ?? 0) + 1;
+    if (next > 3) { toast.info("Already at Level 3"); return; }
+    setPromotingId(t.id);
+    try {
+      await api.promoteTrainee(t.id);
+      toast.success(`${t.name} promoted to Level ${next}`);
+      const bRes = await api.getBatch(id);
+      setTrainees(bRes.trainees || []);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to promote");
+    } finally {
+      setPromotingId(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <AppShell navItems={navItems} subtitle="Admin">
+        <p className="text-neutral-400">Loading…</p>
+      </AppShell>
+    );
+  }
+
+  if (!batch) {
+    return (
+      <AppShell navItems={navItems} subtitle="Admin">
+        <p className="text-neutral-500">Batch not found.</p>
+      </AppShell>
+    );
+  }
+
+  const totalWatched = Object.values(progressMap).reduce(
+    (acc, prog) => acc + prog.filter((p) => p.watched).length,
+    0
+  );
+  const totalPossible = totalLessons * trainees.length;
+  const batchPct = totalPossible ? Math.round((totalWatched / totalPossible) * 100) : 0;
+
+  return (
+    <AppShell navItems={navItems} subtitle="Admin">
+      <Link
+        to="/admin/batches"
+        className="inline-flex items-center text-sm text-neutral-500 hover:text-neutral-900 mb-6"
+      >
+        <ArrowLeft className="h-4 w-4 mr-1.5" />
+        Back to batches
+      </Link>
+
+      {/* Batch Info */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        <Card className="lg:col-span-2 rounded-2xl border-neutral-200/80 p-7">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Batch</p>
+              <h1 className="text-3xl font-semibold mt-1 tracking-tight">{batch.name}</h1>
+              {batch.start_date && (
+                <p className="text-sm text-neutral-500 mt-1">Started: {batch.start_date}</p>
+              )}
+            </div>
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs ring-1 ${statusBadge(batch.status)}`}>
+              {batch.status}
+            </span>
+          </div>
+          {batch.notes && (
+            <div className="mt-6 p-4 rounded-xl bg-neutral-50 text-sm text-neutral-700">
+              {batch.notes}
+            </div>
+          )}
+        </Card>
+
+        {/* Batch Progress */}
+        <Card className="rounded-2xl border-neutral-200/80 p-7">
+          <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Batch Progress</p>
+          <p className="text-4xl font-semibold mt-2 tabular-nums">
+            {batchPct}<span className="text-neutral-300 text-2xl">%</span>
+          </p>
+          <p className="text-sm text-neutral-500 mt-1">{trainees.length} trainees</p>
+          <div className="h-2 bg-neutral-100 rounded-full overflow-hidden mt-5">
+            <div
+              className="h-full rounded-full"
+              style={{ width: `${batchPct}%`, backgroundColor: "#E05A2B" }}
+            />
+          </div>
+          <div className="mt-4 text-sm text-neutral-600 flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 text-neutral-400" />
+            {totalWatched} / {totalPossible} lessons watched
+          </div>
+        </Card>
+      </div>
+
+      {/* Trainees Table */}
+      <Card className="rounded-2xl border-neutral-200/80 overflow-hidden">
+        <div className="px-6 py-4 border-b border-neutral-100">
+          <h2 className="text-lg font-semibold">Trainees in this batch</h2>
+        </div>
+        {trainees.length === 0 ? (
+          <div className="px-6 py-12 text-center text-neutral-400">
+            No trainees assigned to this batch yet.
+            <br />
+            <span className="text-sm">Go to Trainees page to assign trainees to this batch.</span>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wider text-neutral-500 border-b border-neutral-100">
+                  <th className="px-5 py-3 font-medium">Name</th>
+                  <th className="px-5 py-3 font-medium">Username</th>
+                  <th className="px-5 py-3 font-medium">Level</th>
+                  <th className="px-5 py-3 font-medium">Progress</th>
+                  <th className="px-5 py-3 font-medium">Watch Time</th>
+                  <th className="px-5 py-3 font-medium">Status</th>
+                  <th className="px-5 py-3 font-medium text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trainees.map((t) => {
+                  const prog = progressMap[t.id] || [];
+                  const watched = prog.filter((p) => p.watched).length;
+                  const seconds = prog.reduce((acc, p) => acc + (p.watch_seconds || 0), 0);
+                  const pct = totalLessons ? Math.round((watched / totalLessons) * 100) : 0;
+                  return (
+                    <tr key={t.id} className="border-b border-neutral-50 hover:bg-neutral-50/60">
+                      <td className="px-5 py-4 font-medium">
+                        <Link
+                          to={`/admin/trainees/${t.id}`}
+                          className="hover:underline inline-flex items-center gap-1"
+                        >
+                          {t.name}
+                        </Link>
+                      </td>
+                      <td className="px-5 py-4 text-neutral-600">{t.username}</td>
+                      <td className="px-5 py-4">
+                        <Badge
+                          variant="secondary"
+                          className="rounded-full font-medium"
+                          style={{ backgroundColor: "#FFF0E8", color: "#E05A2B" }}
+                        >
+                          L{t.current_level ?? 0}
+                        </Badge>
+                      </td>
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-2">
+                          <div className="w-20 h-1.5 bg-neutral-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full"
+                              style={{ width: `${pct}%`, backgroundColor: "#E05A2B" }}
+                            />
+                          </div>
+                          <span className="text-xs text-neutral-500">{watched}/{totalLessons}</span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-4 text-neutral-600">
+                        <span className="inline-flex items-center gap-1 text-xs">
+                          <Clock className="h-3.5 w-3.5" />
+                          {fmtMinutes(seconds)}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs ring-1 ${
+                          t.status === "Active"
+                            ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                            : "bg-neutral-100 text-neutral-600 ring-neutral-200"
+                        }`}>
+                          {t.status}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4 text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={(t.current_level ?? 0) >= 3 || promotingId === t.id}
+                          onClick={() => promote(t)}
+                          className="rounded-full"
+                        >
+                          <TrendingUp className="h-3.5 w-3.5 mr-1" />
+                          Promote
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </AppShell>
+  );
+}
