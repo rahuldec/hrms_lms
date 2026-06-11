@@ -218,7 +218,7 @@ export default function AdminDashboard() {
                                         {pct >= 0.7 ? "✓ Pass" : "✗ Fail"}
                                       </span>
                                       {a.link && (
-                                        
+                                        <a
                                           href={a.link}
                                           target="_blank"
                                           rel="noopener noreferrer"
