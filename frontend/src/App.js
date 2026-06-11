@@ -2,13 +2,14 @@ import React from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
-
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import Protected from "@/components/Protected";
 import Login from "@/pages/Login";
 import AdminDashboard from "@/pages/admin/Dashboard";
 import Trainees from "@/pages/admin/Trainees";
 import TraineeDetail from "@/pages/admin/TraineeDetail";
+import Batches from "@/pages/admin/Batches";
+import BatchDetail from "@/pages/admin/BatchDetail";
 import TraineeHome from "@/pages/trainee/Home";
 
 function RootRedirect() {
@@ -53,6 +54,22 @@ export default function App() {
             element={
               <Protected requireRole="admin">
                 <TraineeDetail />
+              </Protected>
+            }
+          />
+          <Route
+            path="/admin/batches"
+            element={
+              <Protected requireRole="admin">
+                <Batches />
+              </Protected>
+            }
+          />
+          <Route
+            path="/admin/batches/:id"
+            element={
+              <Protected requireRole="admin">
+                <BatchDetail />
               </Protected>
             }
           />
