@@ -63,11 +63,13 @@ const emptyForm = {
   notes: "",
   username: "",
   password: "",
+  batch_id: "",
 };
 
 const navItems = [
   { to: "/admin", label: "Dashboard", testId: "nav-dashboard" },
   { to: "/admin/trainees", label: "Trainees", testId: "nav-trainees" },
+  { to: "/admin/batches", label: "Batches", testId: "nav-batches" },
 ];
 
 const errMsg = (e) =>
@@ -75,6 +77,7 @@ const errMsg = (e) =>
 
 export default function Trainees() {
   const [list, setList] = useState([]);
+  const [batches, setBatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
@@ -87,8 +90,12 @@ export default function Trainees() {
   const load = async () => {
     setLoading(true);
     try {
-      const data = await api.listTrainees();
+      const [data, batchData] = await Promise.all([
+        api.listTrainees(),
+        api.listBatches(),
+      ]);
       setList(Array.isArray(data) ? data : []);
+      setBatches(Array.isArray(batchData) ? batchData : []);
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -96,9 +103,7 @@ export default function Trainees() {
     }
   };
 
-  useEffect(() => {
-    load();
-  }, []);
+  useEffect(() => { load(); }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -111,6 +116,11 @@ export default function Trainees() {
         t.phone?.toLowerCase().includes(q)
     );
   }, [list, search]);
+
+  const getBatchName = (batch_id) => {
+    const b = batches.find((b) => b.id === batch_id);
+    return b ? b.name : "—";
+  };
 
   const openCreate = () => {
     setEditing(null);
@@ -129,6 +139,7 @@ export default function Trainees() {
       notes: t.notes || "",
       username: t.username || "",
       password: "",
+      batch_id: t.batch_id || "",
     });
     setModalOpen(true);
   };
@@ -149,6 +160,7 @@ export default function Trainees() {
           manager: form.manager,
           status: form.status,
           notes: form.notes,
+          batch_id: form.batch_id || null,
         });
         toast.success("Trainee updated");
       } else {
@@ -166,6 +178,7 @@ export default function Trainees() {
           notes: form.notes,
           username: form.username.trim().toLowerCase(),
           password: form.password,
+          batch_id: form.batch_id || null,
         });
         toast.success("Trainee added");
       }
@@ -192,10 +205,7 @@ export default function Trainees() {
 
   const promote = async (t) => {
     const next = (t.current_level ?? 0) + 1;
-    if (next > 3) {
-      toast.info("Already at Level 3");
-      return;
-    }
+    if (next > 3) { toast.info("Already at Level 3"); return; }
     setPromotingId(t.id);
     try {
       await api.promoteTrainee(t.id);
@@ -212,12 +222,8 @@ export default function Trainees() {
     <AppShell navItems={navItems} subtitle="Admin">
       <div className="flex items-end justify-between mb-8 flex-wrap gap-4">
         <div>
-          <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">
-            Roster
-          </p>
-          <h1 className="text-4xl font-semibold mt-1 tracking-tight">
-            Trainees
-          </h1>
+          <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Roster</p>
+          <h1 className="text-4xl font-semibold mt-1 tracking-tight">Trainees</h1>
         </div>
         <Button
           data-testid="add-trainee-button"
@@ -246,6 +252,7 @@ export default function Trainees() {
               <tr className="text-left text-xs uppercase tracking-wider text-neutral-500 border-b border-neutral-100">
                 <th className="px-5 py-3 font-medium">Name</th>
                 <th className="px-5 py-3 font-medium">Username</th>
+                <th className="px-5 py-3 font-medium">Batch</th>
                 <th className="px-5 py-3 font-medium">Manager</th>
                 <th className="px-5 py-3 font-medium">Joined</th>
                 <th className="px-5 py-3 font-medium">Status</th>
@@ -256,26 +263,17 @@ export default function Trainees() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-5 py-12 text-center text-neutral-400">
-                    Loading…
-                  </td>
+                  <td colSpan={8} className="px-5 py-12 text-center text-neutral-400">Loading...</td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td
-                    colSpan={7}
-                    className="px-5 py-12 text-center text-neutral-400"
-                  >
+                  <td colSpan={8} className="px-5 py-12 text-center text-neutral-400">
                     No trainees yet. Click "Add trainee" to get started.
                   </td>
                 </tr>
               ) : (
                 filtered.map((t) => (
-                  <tr
-                    key={t.id}
-                    data-testid={`trainee-row-${t.id}`}
-                    className="border-b border-neutral-50 hover:bg-neutral-50/60"
-                  >
+                  <tr key={t.id} className="border-b border-neutral-50 hover:bg-neutral-50/60">
                     <td className="px-5 py-4 font-medium text-neutral-900">
                       <Link
                         to={`/admin/trainees/${t.id}`}
@@ -287,17 +285,19 @@ export default function Trainees() {
                     </td>
                     <td className="px-5 py-4 text-neutral-600">{t.username}</td>
                     <td className="px-5 py-4 text-neutral-600">
-                      {t.manager || "—"}
+                      {t.batch_id ? (
+                        <Link
+                          to={`/admin/batches/${t.batch_id}`}
+                          className="hover:underline text-orange-600"
+                        >
+                          {getBatchName(t.batch_id)}
+                        </Link>
+                      ) : "—"}
                     </td>
-                    <td className="px-5 py-4 text-neutral-600">
-                      {t.join_date || "—"}
-                    </td>
+                    <td className="px-5 py-4 text-neutral-600">{t.manager || "—"}</td>
+                    <td className="px-5 py-4 text-neutral-600">{t.join_date || "—"}</td>
                     <td className="px-5 py-4">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs ring-1 ${statusBadge(
-                          t.status
-                        )}`}
-                      >
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs ring-1 ${statusBadge(t.status)}`}>
                         {t.status || "—"}
                       </span>
                     </td>
@@ -305,10 +305,7 @@ export default function Trainees() {
                       <Badge
                         variant="secondary"
                         className="rounded-full font-medium"
-                        style={{
-                          backgroundColor: "#FFF0E8",
-                          color: "#E05A2B",
-                        }}
+                        style={{ backgroundColor: "#FFF0E8", color: "#E05A2B" }}
                       >
                         L{t.current_level ?? 0}
                       </Badge>
@@ -319,9 +316,7 @@ export default function Trainees() {
                           data-testid={`promote-${t.id}`}
                           size="sm"
                           variant="outline"
-                          disabled={
-                            (t.current_level ?? 0) >= 3 || promotingId === t.id
-                          }
+                          disabled={(t.current_level ?? 0) >= 3 || promotingId === t.id}
                           onClick={() => promote(t)}
                           className="rounded-full"
                         >
@@ -357,18 +352,11 @@ export default function Trainees() {
       </Card>
 
       <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-        <DialogContent
-          data-testid="trainee-dialog"
-          className="sm:max-w-lg rounded-2xl"
-        >
+        <DialogContent data-testid="trainee-dialog" className="sm:max-w-lg rounded-2xl">
           <DialogHeader>
-            <DialogTitle>
-              {editing ? "Edit trainee" : "Add a new trainee"}
-            </DialogTitle>
+            <DialogTitle>{editing ? "Edit trainee" : "Add a new trainee"}</DialogTitle>
             <DialogDescription>
-              {editing
-                ? "Update trainee details. Username cannot be changed."
-                : "Create a new trainee account with login credentials."}
+              {editing ? "Update trainee details. Username cannot be changed." : "Create a new trainee account with login credentials."}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={save} className="space-y-4">
@@ -397,9 +385,7 @@ export default function Trainees() {
                   data-testid="form-joindate"
                   type="date"
                   value={form.join_date}
-                  onChange={(e) =>
-                    setForm({ ...form, join_date: e.target.value })
-                  }
+                  onChange={(e) => setForm({ ...form, join_date: e.target.value })}
                   className="h-10 rounded-xl mt-1"
                 />
               </div>
@@ -408,29 +394,19 @@ export default function Trainees() {
                 <Input
                   data-testid="form-manager"
                   value={form.manager}
-                  onChange={(e) =>
-                    setForm({ ...form, manager: e.target.value })
-                  }
+                  onChange={(e) => setForm({ ...form, manager: e.target.value })}
                   className="h-10 rounded-xl mt-1"
                 />
               </div>
               <div>
                 <Label className="text-xs text-neutral-600">Status</Label>
-                <Select
-                  value={form.status}
-                  onValueChange={(v) => setForm({ ...form, status: v })}
-                >
-                  <SelectTrigger
-                    data-testid="form-status"
-                    className="h-10 rounded-xl mt-1"
-                  >
+                <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+                  <SelectTrigger data-testid="form-status" className="h-10 rounded-xl mt-1">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {STATUSES.map((s) => (
-                      <SelectItem key={s} value={s}>
-                        {s}
-                      </SelectItem>
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -441,9 +417,7 @@ export default function Trainees() {
                   data-testid="form-username"
                   value={form.username}
                   disabled={!!editing}
-                  onChange={(e) =>
-                    setForm({ ...form, username: e.target.value })
-                  }
+                  onChange={(e) => setForm({ ...form, username: e.target.value })}
                   className="h-10 rounded-xl mt-1"
                 />
               </div>
@@ -454,13 +428,28 @@ export default function Trainees() {
                     data-testid="form-password"
                     type="text"
                     value={form.password}
-                    onChange={(e) =>
-                      setForm({ ...form, password: e.target.value })
-                    }
+                    onChange={(e) => setForm({ ...form, password: e.target.value })}
                     className="h-10 rounded-xl mt-1"
                   />
                 </div>
               )}
+              <div className="col-span-2">
+                <Label className="text-xs text-neutral-600">Batch</Label>
+                <Select
+                  value={form.batch_id || "none"}
+                  onValueChange={(v) => setForm({ ...form, batch_id: v === "none" ? "" : v })}
+                >
+                  <SelectTrigger className="h-10 rounded-xl mt-1">
+                    <SelectValue placeholder="Select batch" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— No batch —</SelectItem>
+                    {batches.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="col-span-2">
                 <Label className="text-xs text-neutral-600">Notes</Label>
                 <Textarea
@@ -473,12 +462,7 @@ export default function Trainees() {
               </div>
             </div>
             <DialogFooter>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setModalOpen(false)}
-                className="rounded-full"
-              >
+              <Button type="button" variant="ghost" onClick={() => setModalOpen(false)} className="rounded-full">
                 Cancel
               </Button>
               <Button
@@ -488,25 +472,19 @@ export default function Trainees() {
                 className="rounded-full text-white"
                 style={{ backgroundColor: "#E05A2B" }}
               >
-                {saving ? "Saving…" : editing ? "Save changes" : "Create trainee"}
+                {saving ? "Saving..." : editing ? "Save changes" : "Create trainee"}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      <AlertDialog
-        open={!!confirmDelete}
-        onOpenChange={(o) => !o && setConfirmDelete(null)}
-      >
+      <AlertDialog open={!!confirmDelete} onOpenChange={(o) => !o && setConfirmDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              Remove {confirmDelete?.name}?
-            </AlertDialogTitle>
+            <AlertDialogTitle>Remove {confirmDelete?.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              This permanently removes the trainee, their login and their
-              lesson progress.
+              This permanently removes the trainee, their login and their lesson progress.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
