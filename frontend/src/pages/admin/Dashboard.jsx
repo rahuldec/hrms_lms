@@ -217,7 +217,7 @@ export default function AdminDashboard() {
                                         {a.passed ? "✓ Pass" : "✗ Fail"}
                                       </span>
                                       {a.link && (
-                                        
+                                        <a
                                           href={a.link}
                                           target="_blank"
                                           rel="noopener noreferrer"
