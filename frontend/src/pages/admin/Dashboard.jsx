@@ -48,7 +48,6 @@ function AssignmentModal({ assignment, onClose }) {
         className="bg-white rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="px-6 py-4 flex items-center justify-between border-b border-neutral-100">
           <div>
             <p className="text-xs text-neutral-500 uppercase tracking-wider mb-0.5">Assignment</p>
@@ -59,7 +58,7 @@ function AssignmentModal({ assignment, onClose }) {
               className="inline-flex items-center gap-1.5 text-sm border rounded-full px-3 py-1 font-semibold"
               style={{ borderColor: color + "40", backgroundColor: color + "10", color }}
             >
-              {assignment.score}/{assignment.total} {assignment.passed ? "✓ Pass" : "✗ Fail"}
+              {assignment.score}/{assignment.total} {assignment.passed ? "Pass" : "Fail"}
             </div>
             <button onClick={onClose} className="h-8 w-8 rounded-full hover:bg-neutral-100 grid place-items-center">
               <X className="h-4 w-4 text-neutral-500" />
@@ -67,7 +66,6 @@ function AssignmentModal({ assignment, onClose }) {
           </div>
         </div>
 
-        {/* Recording */}
         {assignment.link && (
           <div className="px-6 py-3 bg-neutral-50 border-b border-neutral-100">
             
@@ -81,7 +79,6 @@ function AssignmentModal({ assignment, onClose }) {
           </div>
         )}
 
-        {/* Q&A */}
         <div className="overflow-y-auto max-h-[60vh] px-6 py-4 space-y-4">
           {(assignment.qa || []).map((item, i) => (
             <div key={i} className="border border-neutral-100 rounded-xl p-4">
@@ -264,7 +261,6 @@ export default function AdminDashboard() {
                             </div>
                           </div>
 
-                          {/* Assignment Scores - clickable */}
                           <div className="mt-3 ml-11">
                             {assignments.length > 0 ? (
                               <div className="flex flex-wrap gap-2 mb-3">
@@ -282,7 +278,7 @@ export default function AdminDashboard() {
                                         {a.score}/{a.total}
                                       </span>
                                       <span style={{ color }}>
-                                        {a.passed ? "✓ Pass" : "✗ Fail"}
+                                        {a.passed ? "Pass" : "Fail"}
                                       </span>
                                     </button>
                                   );
@@ -331,7 +327,6 @@ export default function AdminDashboard() {
         </div>
       </Card>
 
-      {/* Assignment Detail Modal */}
       <AssignmentModal assignment={activeAssignment} onClose={() => setActiveAssignment(null)} />
     </AppShell>
   );
