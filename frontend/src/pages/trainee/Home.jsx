@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState, useRef } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 import { fetchSheetModules } from "@/lib/sheet";
+import { fetchAllAssignmentResults } from "@/lib/assignments";
 import AppShell from "@/components/AppShell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,13 +29,13 @@ export default function TraineeHome() {
   const { trainee } = useAuth();
   const [modules, setModules] = useState([]);
   const [progress, setProgress] = useState({});
+  const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeLesson, setActiveLesson] = useState(null);
   const tickRef = useRef(null);
   const tickStartRef = useRef(null);
   const progressRef = useRef({});
 
-  // keep ref in sync so timer reads latest
   useEffect(() => {
     progressRef.current = progress;
   }, [progress]);
@@ -53,6 +54,11 @@ export default function TraineeHome() {
         const mods = await fetchSheetModules();
         setModules(mods);
         await reloadProgress();
+
+        // Fetch assignment scores for this trainee
+        const allResults = await fetchAllAssignmentResults().catch(() => ({}));
+        const key = (trainee.name || "").trim().toLowerCase();
+        setAssignments(allResults[key] || []);
       } catch (e) {
         toast.error("Could not load training content");
       } finally {
@@ -90,9 +96,7 @@ export default function TraineeHome() {
           watch_seconds_delta: delta,
         });
         setProgress((prev) => ({ ...prev, [ref.lessonId]: updated }));
-      } catch (e) {
-        // silent
-      }
+      } catch (e) {}
     }, 5000);
   };
 
@@ -111,9 +115,7 @@ export default function TraineeHome() {
             watch_seconds_delta: delta,
           });
           setProgress((prev) => ({ ...prev, [ref.lessonId]: updated }));
-        } catch (e) {
-          // silent
-        }
+        } catch (e) {}
       }
       tickStartRef.current = null;
     }
@@ -195,16 +197,14 @@ export default function TraineeHome() {
         </p>
       </div>
 
-      <Card className="rounded-2xl border-neutral-200/80 p-7 mb-10">
+      {/* Overall Progress */}
+      <Card className="rounded-2xl border-neutral-200/80 p-7 mb-6">
         <div className="flex items-baseline justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">
               Overall progress
             </p>
-            <p
-              className="text-5xl font-semibold mt-2 tabular-nums"
-              data-testid="overall-progress-value"
-            >
+            <p className="text-5xl font-semibold mt-2 tabular-nums" data-testid="overall-progress-value">
               {stats.watched}
               <span className="text-neutral-300 text-3xl">/{stats.total}</span>
             </p>
@@ -225,12 +225,53 @@ export default function TraineeHome() {
         </div>
       </Card>
 
+      {/* Assignment Scores */}
+      <Card className="rounded-2xl border-neutral-200/80 p-7 mb-10">
+        <p className="text-xs uppercase tracking-[0.18em] text-neutral-500 mb-4">
+          Assignment scores
+        </p>
+        {assignments.length > 0 ? (
+          <div className="flex flex-wrap gap-3">
+            {assignments.map((a) => {
+              const color = a.passed ? "#16a34a" : "#dc2626";
+              return (
+                <div
+                  key={a.id}
+                  className="inline-flex items-center gap-2 text-sm border rounded-2xl px-4 py-2.5"
+                  style={{ borderColor: color + "40", backgroundColor: color + "10" }}
+                >
+                  <span className="font-medium text-neutral-700">{a.name}</span>
+                  <span className="font-bold tabular-nums" style={{ color }}>
+                    {a.score}/{a.total}
+                  </span>
+                  <span className="text-xs font-medium" style={{ color }}>
+                    {a.passed ? "✓ Pass" : "✗ Fail"}
+                  </span>
+                  {a.link && (
+                    
+                      href={a.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs underline ml-1"
+                      style={{ color: "#2563eb" }}
+                    >
+                      View
+                    </a>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-neutral-400">No assignments attempted yet.</p>
+        )}
+      </Card>
+
+      {/* Modules */}
       <div className="space-y-8">
         {modules.map((mod) => {
           const modLessons = mod.lessons.filter((l) => l.kind === "video");
-          const modWatched = modLessons.filter(
-            (l) => progress[l.id]?.watched
-          ).length;
+          const modWatched = modLessons.filter((l) => progress[l.id]?.watched).length;
           return (
             <section key={mod.id} data-testid={`module-${mod.order}`}>
               <div className="flex items-baseline justify-between mb-3">
@@ -258,10 +299,7 @@ export default function TraineeHome() {
                       >
                         {l.kind === "video" ? (
                           watched ? (
-                            <CheckCircle2
-                              className="h-5 w-5 flex-shrink-0"
-                              style={{ color: "#E05A2B" }}
-                            />
+                            <CheckCircle2 className="h-5 w-5 flex-shrink-0" style={{ color: "#E05A2B" }} />
                           ) : (
                             <Circle className="h-5 w-5 text-neutral-300 flex-shrink-0" />
                           )
@@ -271,16 +309,12 @@ export default function TraineeHome() {
                           <Circle className="h-5 w-5 text-neutral-200 flex-shrink-0" />
                         )}
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-neutral-900 truncate">
-                            {l.title}
-                          </p>
+                          <p className="text-sm font-medium text-neutral-900 truncate">{l.title}</p>
                           <p className="text-xs text-neutral-500 mt-0.5">
                             {l.day}
                             {l.kind === "assignment" && " · Assignment PDF"}
                             {l.kind === "review" && " · Review"}
-                            {p?.watch_seconds
-                              ? ` · ${fmt(p.watch_seconds)} watched`
-                              : ""}
+                            {p?.watch_seconds ? ` · ${fmt(p.watch_seconds)} watched` : ""}
                           </p>
                         </div>
                         {l.kind === "video" && l.videoEmbedUrl && (
@@ -317,12 +351,7 @@ export default function TraineeHome() {
                 </p>
                 <p className="font-semibold truncate">{activeLesson.title}</p>
               </div>
-              <Button
-                data-testid="close-video"
-                variant="ghost"
-                onClick={closeLesson}
-                className="rounded-full"
-              >
+              <Button data-testid="close-video" variant="ghost" onClick={closeLesson} className="rounded-full">
                 Close
               </Button>
             </div>
@@ -346,9 +375,7 @@ export default function TraineeHome() {
                 className="rounded-full text-white"
                 style={{ backgroundColor: "#E05A2B" }}
               >
-                {progress[activeLesson.id]?.watched
-                  ? "Mark as unwatched"
-                  : "Mark as watched"}
+                {progress[activeLesson.id]?.watched ? "Mark as unwatched" : "Mark as watched"}
               </Button>
             </div>
           </div>
