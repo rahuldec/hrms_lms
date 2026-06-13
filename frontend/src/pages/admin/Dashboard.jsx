@@ -5,14 +5,11 @@ import { fetchAllAssignmentResults } from "@/lib/assignments";
 import AppShell from "@/components/AppShell";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Users, TrendingUp, CheckCircle2, PauseCircle, ChevronDown, ChevronUp } from "lucide-react";
+import { Users, TrendingUp, CheckCircle2, PauseCircle, ChevronDown, ChevronUp, X } from "lucide-react";
 import { toast } from "sonner";
 
 const Stat = ({ icon: Icon, label, value, testId }) => (
-  <Card
-    data-testid={testId}
-    className="rounded-2xl border-neutral-200/80 p-6 hover:shadow-sm transition-shadow"
-  >
+  <Card data-testid={testId} className="rounded-2xl border-neutral-200/80 p-6 hover:shadow-sm transition-shadow">
     <div className="flex items-start justify-between">
       <div>
         <p className="text-xs uppercase tracking-[0.14em] text-neutral-500">{label}</p>
@@ -39,11 +36,82 @@ const fmtDate = (iso) => {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 };
 
+function AssignmentModal({ assignment, onClose }) {
+  if (!assignment) return null;
+  const color = assignment.passed ? "#16a34a" : "#dc2626";
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-neutral-900/70 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-6 py-4 flex items-center justify-between border-b border-neutral-100">
+          <div>
+            <p className="text-xs text-neutral-500 uppercase tracking-wider mb-0.5">Assignment</p>
+            <p className="font-semibold text-lg">{assignment.name}</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div
+              className="inline-flex items-center gap-1.5 text-sm border rounded-full px-3 py-1 font-semibold"
+              style={{ borderColor: color + "40", backgroundColor: color + "10", color }}
+            >
+              {assignment.score}/{assignment.total} {assignment.passed ? "✓ Pass" : "✗ Fail"}
+            </div>
+            <button onClick={onClose} className="h-8 w-8 rounded-full hover:bg-neutral-100 grid place-items-center">
+              <X className="h-4 w-4 text-neutral-500" />
+            </button>
+          </div>
+        </div>
+
+        {/* Recording */}
+        {assignment.link && (
+          <div className="px-6 py-3 bg-neutral-50 border-b border-neutral-100">
+            
+              href={assignment.link}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 text-sm font-medium text-blue-600 hover:underline"
+            >
+              🎥 View Recording
+            </a>
+          </div>
+        )}
+
+        {/* Q&A */}
+        <div className="overflow-y-auto max-h-[60vh] px-6 py-4 space-y-4">
+          {(assignment.qa || []).map((item, i) => (
+            <div key={i} className="border border-neutral-100 rounded-xl p-4">
+              <p className="text-xs text-neutral-500 mb-1">Q{i + 1}</p>
+              <p className="text-sm font-medium text-neutral-800 mb-2">{item.question}</p>
+              <div className="flex items-center gap-2">
+                <span className="text-xs uppercase tracking-wider text-neutral-400">Answer:</span>
+                <span
+                  className="text-sm font-semibold"
+                  style={{
+                    color: item.answer === "Yes" ? "#16a34a" : item.answer === "No" ? "#dc2626" : "#374151",
+                  }}
+                >
+                  {item.answer || "—"}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminDashboard() {
   const [trainees, setTrainees] = useState([]);
   const [assignmentResults, setAssignmentResults] = useState({});
   const [loading, setLoading] = useState(true);
   const [expandedLevel, setExpandedLevel] = useState(null);
+  const [activeAssignment, setActiveAssignment] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -160,7 +228,6 @@ export default function AdminDashboard() {
                       const assignments = getAssignments(t.name);
                       return (
                         <div key={t.id} className="px-5 py-4">
-                          {/* Trainee Header */}
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               <div
@@ -197,16 +264,17 @@ export default function AdminDashboard() {
                             </div>
                           </div>
 
-                          {/* Assignment Scores */}
+                          {/* Assignment Scores - clickable */}
                           <div className="mt-3 ml-11">
                             {assignments.length > 0 ? (
                               <div className="flex flex-wrap gap-2 mb-3">
                                 {assignments.map((a) => {
                                   const color = a.passed ? "#16a34a" : "#dc2626";
                                   return (
-                                    <div
+                                    <button
                                       key={a.id}
-                                      className="inline-flex items-center gap-1.5 text-xs border rounded-full px-2.5 py-1"
+                                      onClick={() => setActiveAssignment(a)}
+                                      className="inline-flex items-center gap-1.5 text-xs border rounded-full px-2.5 py-1 cursor-pointer hover:opacity-80 transition-opacity"
                                       style={{ borderColor: color + "40", backgroundColor: color + "10" }}
                                     >
                                       <span className="font-medium text-neutral-700">{a.name}:</span>
@@ -216,19 +284,7 @@ export default function AdminDashboard() {
                                       <span style={{ color }}>
                                         {a.passed ? "✓ Pass" : "✗ Fail"}
                                       </span>
-                                      {a.link && (
-                                        <a
-                                          href={a.link}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="underline ml-0.5"
-                                          style={{ color: "#2563eb" }}
-                                          onClick={(e) => e.stopPropagation()}
-                                        >
-                                          View
-                                        </a>
-                                      )}
-                                    </div>
+                                    </button>
                                   );
                                 })}
                               </div>
@@ -236,7 +292,6 @@ export default function AdminDashboard() {
                               <p className="text-xs text-neutral-400 mb-2">No assignments attempted</p>
                             )}
 
-                            {/* Promotion History */}
                             {promotions.length > 0 ? (
                               <>
                                 <p className="text-xs text-neutral-400 uppercase tracking-wider mb-1.5">
@@ -275,6 +330,9 @@ export default function AdminDashboard() {
           })}
         </div>
       </Card>
+
+      {/* Assignment Detail Modal */}
+      <AssignmentModal assignment={activeAssignment} onClose={() => setActiveAssignment(null)} />
     </AppShell>
   );
 }
