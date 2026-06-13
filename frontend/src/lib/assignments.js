@@ -9,6 +9,23 @@ export const ASSIGNMENTS = [
     nameCol: "Name",
     totalMarks: 15,
     passThreshold: 9,
+    questions: [
+      "Shift all boys from Class 11 Commerce to Class 11 Non-Medical in a single action.",
+      "How many students are studying in the institute ?",
+      "How many no. of students left the institute ?",
+      "How to download multiple admit card in one go?",
+      "In student Profile, create separate sections for it's 10th education details and 12th education details contains fields i.e. Max Marks, Obtained Marks, Result, School name, Board.",
+      "Need a column of phone no. in inactive students excel export.",
+      "Change display name of batch to semester.",
+      "How many students are there in institute belongs to EWS/RTE/134A Category?",
+      "How many current students in institute are using their student app?",
+      "Provide negative feedback to a any student",
+      "What do you mean by dormant student?",
+      "How to inactive a student?",
+      "Remove access to pay fee via student app.",
+      "Promote one specific student to next session with dues",
+      "How to upload student images in bulk?",
+    ],
   },
   {
     id: "fee",
@@ -20,6 +37,23 @@ export const ASSIGNMENTS = [
     nameCol: "Name",
     totalMarks: 15,
     passThreshold: 9,
+    questions: [
+      "While creating a Fee Group, there is an option called \"Auto Awake Status\". What is the purpose of this option?",
+      "Who are Dormant Students?",
+      "Assign Flat 10% concession on tuition fee",
+      "How to pay full fee in April Month?",
+      "Receipt date not coming in daily collection report ? How to fix that?",
+      "How to do fee adjustment and what is it's purpose?",
+      "Print tuition fee certificate of any student",
+      "How to collect Misc Fee?",
+      "How to set separate receipt setting for each session?",
+      "Minimum Payment Percentage is configured as 50%. A particular student is allowed to pay only 10% of the total fee due as an exception. Is it possible - If yes ? Then How?",
+      "What happen if we enable auto adjust extra fee?",
+      "What does it mean by \"Show Zero: No\" in due fee report ?",
+      "How to cancel receipt?",
+      "What's diff between txn list and daily fee report?",
+      "Change default payment mode to Bnak Transfer",
+    ],
   },
 ];
 
@@ -34,15 +68,18 @@ export const fetchAllAssignmentResults = async () => {
         const Papa = (await import("papaparse")).default;
         const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
 
-        if (parsed.data.length > 0) {
-          console.log(`[${assignment.name}] Headers:`, Object.keys(parsed.data[0]));
-        }
-
         parsed.data.forEach((row) => {
           const name = (row[assignment.nameCol] || "").trim().toLowerCase();
           if (!name) return;
           if (!results[name]) results[name] = [];
           const score = parseFloat(row[assignment.scoreCol] || 0);
+
+          // Build Q&A pairs
+          const qa = assignment.questions.map((q) => ({
+            question: q,
+            answer: (row[q] || "").trim(),
+          }));
+
           results[name].push({
             id: assignment.id,
             name: assignment.name,
@@ -50,6 +87,7 @@ export const fetchAllAssignmentResults = async () => {
             total: assignment.totalMarks,
             passed: score >= assignment.passThreshold,
             link: row[assignment.linkCol] || null,
+            qa,
           });
         });
       } catch (e) {
@@ -57,8 +95,5 @@ export const fetchAllAssignmentResults = async () => {
       }
     })
   );
-
-  console.log("[assignments] Final results map:", results);
-
   return results;
 };
