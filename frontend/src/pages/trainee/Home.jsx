@@ -104,6 +104,7 @@ export default function TraineeHome() {
   const [activeAssignment, setActiveAssignment] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeLesson, setActiveLesson] = useState(null);
+  const activeLessonRef = useRef(null);
   const tickRef = useRef(null);
   const tickStartRef = useRef(null);
   const progressRef = useRef({});
@@ -111,6 +112,11 @@ export default function TraineeHome() {
   useEffect(() => {
     progressRef.current = progress;
   }, [progress]);
+
+  // Keep activeLessonRef in sync so event listeners can access it
+  useEffect(() => {
+    activeLessonRef.current = activeLesson;
+  }, [activeLesson]);
 
   const reloadProgress = async () => {
     const res = await api.myProgress();
@@ -146,9 +152,24 @@ export default function TraineeHome() {
     return { total, watched, seconds, pct: total ? (watched / total) * 100 : 0 };
   }, [modules, progress]);
 
-  const startTimer = (lesson) => {
-    stopTimer();
-    tickStartRef.current = { lessonId: lesson.id, startedAt: Date.now() };
+  const pauseTimer = () => {
+    if (tickRef.current) {
+      clearInterval(tickRef.current);
+      tickRef.current = null;
+    }
+    const ref = tickStartRef.current;
+    if (ref) {
+      const delta = Math.floor((Date.now() - ref.startedAt) / 1000);
+      if (delta > 0) {
+        api.upsertProgress({ lesson_id: ref.lessonId, watch_seconds_delta: delta }).catch(() => {});
+      }
+      tickStartRef.current = null;
+    }
+  };
+
+  const resumeTimer = (lessonId) => {
+    if (!lessonId || tickRef.current) return;
+    tickStartRef.current = { lessonId, startedAt: Date.now() };
     tickRef.current = setInterval(async () => {
       const ref = tickStartRef.current;
       if (!ref) return;
@@ -163,6 +184,11 @@ export default function TraineeHome() {
         setProgress((prev) => ({ ...prev, [ref.lessonId]: updated }));
       } catch (e) {}
     }, 5000);
+  };
+
+  const startTimer = (lesson) => {
+    stopTimer();
+    resumeTimer(lesson.id);
   };
 
   const stopTimer = async () => {
@@ -186,7 +212,29 @@ export default function TraineeHome() {
     }
   };
 
-  useEffect(() => () => stopTimer(), []);
+  // Pause timer when user switches tabs, minimizes, or leaves page
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        pauseTimer();
+      } else {
+        const lesson = activeLessonRef.current;
+        if (lesson?.kind === "video") {
+          resumeTimer(lesson.id);
+        }
+      }
+    };
+    const handleBeforeUnload = () => { pauseTimer(); };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, []);
+
+  useEffect(() => () => { stopTimer(); }, []);
 
   const openLesson = (lesson) => {
     if (lesson.kind === "assignment" && lesson.assignmentUrl) {
@@ -262,10 +310,7 @@ export default function TraineeHome() {
         <div className="flex items-baseline justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Overall progress</p>
-            <p
-              className="text-5xl font-semibold mt-2 tabular-nums"
-              data-testid="overall-progress-value"
-            >
+            <p className="text-5xl font-semibold mt-2 tabular-nums" data-testid="overall-progress-value">
               {stats.watched}
               <span className="text-neutral-300 text-3xl">/{stats.total}</span>
             </p>
@@ -344,10 +389,7 @@ export default function TraineeHome() {
                       >
                         {l.kind === "video" ? (
                           watched ? (
-                            <CheckCircle2
-                              className="h-5 w-5 flex-shrink-0"
-                              style={{ color: "#E05A2B" }}
-                            />
+                            <CheckCircle2 className="h-5 w-5 flex-shrink-0" style={{ color: "#E05A2B" }} />
                           ) : (
                             <Circle className="h-5 w-5 text-neutral-300 flex-shrink-0" />
                           )
