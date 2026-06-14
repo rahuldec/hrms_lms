@@ -7,11 +7,12 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, CheckCircle2, Circle, Clock, XCircle } from "lucide-react";
 import { toast } from "sonner";
-import Papa from "papaparse";
 
 const navItems = [
   { to: "/admin", label: "Dashboard", testId: "nav-dashboard" },
   { to: "/admin/trainees", label: "Trainees", testId: "nav-trainees" },
+  { to: "/admin/batches", label: "Batches", testId: "nav-batches" },
+  { to: "/admin/resources", label: "Resources", testId: "nav-resources" },
 ];
 
 const fmtMinutes = (sec) => {
@@ -20,39 +21,20 @@ const fmtMinutes = (sec) => {
   return `${m}m ${s.toString().padStart(2, "0")}s`;
 };
 
-const SIS_CSV_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRdhlvmjnqv5YBTpK4oxX914j6HApyK26brmNyqqkIoKGDLJUPyigKBLOlgB4msgfEacRqTuDZtsU3C/pub?output=csv";
-
-const SKIP_COLS = ["Added Time", "IP Address", "Name", "Overall Score", "Link"];
-
-const fetchSISResult = async (traineeName) => {
-  try {
-    const res = await fetch(SIS_CSV_URL, { cache: "no-store" });
-    if (!res.ok) return null;
-    const text = await res.text();
-    const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
-    const row = parsed.data.find(
-      (r) =>
-        (r["Name"] || "").trim().toLowerCase() ===
-        traineeName.trim().toLowerCase()
-    );
-    if (!row) return null;
-    const questions = parsed.meta.fields.filter((f) => !SKIP_COLS.includes(f));
-    return { row, questions };
-  } catch {
-    return null;
-  }
+const scoreColor = (ratio) => {
+  if (ratio >= 0.7) return "#16a34a";
+  if (ratio >= 0.5) return "#d97706";
+  return "#dc2626";
 };
 
 export default function TraineeDetail() {
   const { id } = useParams();
   const [trainee, setTrainee] = useState(null);
   const [progress, setProgress] = useState([]);
+  const [assignments, setAssignments] = useState([]);
   const [modules, setModules] = useState([]);
-  const [sisResult, setSisResult] = useState(null);
-  const [sisLoading, setSisLoading] = useState(true);
   const [loading, setLoading] = useState(true);
-  const [showSisQuestions, setShowSisQuestions] = useState(false);
+  const [expandedAssignment, setExpandedAssignment] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -63,16 +45,12 @@ export default function TraineeDetail() {
         ]);
         setTrainee(tRes.trainee || null);
         setProgress(tRes.progress || []);
+        setAssignments(tRes.assignments || []);
         setModules(mods || []);
-        if (tRes.trainee?.name) {
-          const sis = await fetchSISResult(tRes.trainee.name);
-          setSisResult(sis);
-        }
       } catch (e) {
         toast.error("Failed to load trainee");
       } finally {
         setLoading(false);
-        setSisLoading(false);
       }
     })();
   }, [id]);
@@ -84,23 +62,12 @@ export default function TraineeDetail() {
   }, [progress]);
 
   const totalLessons = useMemo(
-    () =>
-      modules.reduce(
-        (acc, m) => acc + m.lessons.filter((l) => l.kind === "video").length,
-        0
-      ),
+    () => modules.reduce((acc, m) => acc + m.lessons.filter((l) => l.kind === "video").length, 0),
     [modules]
   );
 
-  const watchedCount = useMemo(
-    () => progress.filter((p) => p.watched).length,
-    [progress]
-  );
-
-  const totalSeconds = useMemo(
-    () => progress.reduce((acc, p) => acc + (p.watch_seconds || 0), 0),
-    [progress]
-  );
+  const watchedCount = useMemo(() => progress.filter((p) => p.watched).length, [progress]);
+  const totalSeconds = useMemo(() => progress.reduce((acc, p) => acc + (p.watch_seconds || 0), 0), [progress]);
 
   if (loading) {
     return (
@@ -118,10 +85,6 @@ export default function TraineeDetail() {
     );
   }
 
-  const sisScore = sisResult ? parseFloat(sisResult.row["Overall Score"] || 0) : null;
-  const sisTotal = sisResult ? sisResult.questions.length : 15;
-  const sisLink = sisResult ? sisResult.row["Link"] : null;
-
   return (
     <AppShell navItems={navItems} subtitle="Admin">
       <Link
@@ -138,20 +101,13 @@ export default function TraineeDetail() {
         <Card className="lg:col-span-2 rounded-2xl border-neutral-200/80 p-7">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">
-                Trainee
-              </p>
-              <h1 className="text-3xl font-semibold mt-1 tracking-tight">
-                {trainee.name}
-              </h1>
+              <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Trainee</p>
+              <h1 className="text-3xl font-semibold mt-1 tracking-tight">{trainee.name}</h1>
               <p className="text-sm text-neutral-500 mt-2">
                 @{trainee.username} · {trainee.phone || "no phone"}
               </p>
             </div>
-            <Badge
-              className="rounded-full"
-              style={{ backgroundColor: "#FFF0E8", color: "#E05A2B" }}
-            >
+            <Badge className="rounded-full" style={{ backgroundColor: "#FFF0E8", color: "#E05A2B" }}>
               Level {trainee.current_level ?? 0}
             </Badge>
           </div>
@@ -184,9 +140,7 @@ export default function TraineeDetail() {
         <div className="flex flex-col gap-6">
           {/* Video Progress */}
           <Card className="rounded-2xl border-neutral-200/80 p-7">
-            <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">
-              Progress
-            </p>
+            <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Progress</p>
             <p className="text-4xl font-semibold mt-2 tabular-nums">
               {watchedCount}
               <span className="text-neutral-300 text-2xl">/{totalLessons}</span>
@@ -203,105 +157,67 @@ export default function TraineeDetail() {
             </div>
             <div className="mt-6 flex items-center gap-2 text-sm text-neutral-600">
               <Clock className="h-4 w-4 text-neutral-400" />
-              Total watch time:{" "}
-              <span className="font-medium">{fmtMinutes(totalSeconds)}</span>
+              Total watch time: <span className="font-medium">{fmtMinutes(totalSeconds)}</span>
             </div>
           </Card>
 
-          {/* SIS Assignment Score */}
-          <Card className="rounded-2xl border-neutral-200/80 p-7">
-            <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">
-              SIS Assignment
-            </p>
-            {sisLoading ? (
-              <p className="text-sm text-neutral-400 mt-2">Loading...</p>
-            ) : sisScore !== null ? (
-              <>
-                <p className="text-4xl font-semibold mt-2 tabular-nums">
-                  {sisScore}
-                  <span className="text-neutral-300 text-2xl">/{sisTotal}</span>
-                </p>
-                <div className="h-2 bg-neutral-100 rounded-full overflow-hidden mt-4">
-                  <div
-                    className="h-full rounded-full"
-                    style={{
-                      width: `${(sisScore / sisTotal) * 100}%`,
-                      backgroundColor:
-                        sisScore / sisTotal >= 0.7
-                          ? "#16a34a"
-                          : sisScore / sisTotal >= 0.5
-                          ? "#d97706"
-                          : "#dc2626",
-                    }}
-                  />
-                </div>
-                <p
-                  className="text-sm mt-3 font-medium"
-                  style={{
-                    color:
-                      sisScore / sisTotal >= 0.7
-                        ? "#16a34a"
-                        : sisScore / sisTotal >= 0.5
-                        ? "#d97706"
-                        : "#dc2626",
-                  }}
-                >
-                  {sisScore / sisTotal >= 0.7 ? "✓ Pass" : "✗ Needs Improvement"}
-                </p>
-                {sisLink && (
-                  <a
-                    href={sisLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-blue-600 hover:underline mt-2 inline-block"
-                  >
-                    View submission →
-                  </a>
-                )}
-                <button
-                  onClick={() => setShowSisQuestions((p) => !p)}
-                  className="mt-4 text-xs text-neutral-500 hover:text-neutral-800 flex items-center gap-1 w-full"
-                >
-                  {showSisQuestions ? "▲ Hide breakdown" : "▼ Show breakdown"}
-                </button>
-                {showSisQuestions && (
-                  <ul className="mt-3 divide-y divide-neutral-100 border border-neutral-100 rounded-xl overflow-hidden">
-                    {sisResult.questions.map((q, i) => {
-                      const ans = (sisResult.row[q] || "").trim().toLowerCase();
-                      const correct = ans === "yes";
-                      return (
-                        <li key={i} className="px-3 py-2 flex items-start gap-2 text-xs">
-                          {correct ? (
-                            <CheckCircle2
-                              className="h-3.5 w-3.5 flex-shrink-0 mt-0.5"
-                              style={{ color: "#16a34a" }}
-                            />
-                          ) : (
-                            <XCircle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5 text-red-500" />
-                          )}
-                          <p className="flex-1 text-neutral-700">{q}</p>
-                          <span className={`font-medium ${correct ? "text-green-600" : "text-red-500"}`}>
-                            {correct ? "Yes" : "No"}
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </>
-            ) : (
-              <p className="text-sm text-neutral-400 mt-2">Not attempted yet</p>
-            )}
-          </Card>
+          {/* All Assignments */}
+          {assignments.length > 0 ? (
+            assignments.map((a) => {
+              const total = a.total_marks || 15;
+              const ratio = a.score !== null && a.score !== undefined ? a.score / total : null;
+              const color = ratio !== null ? scoreColor(ratio) : "#94a3b8";
+              const isExpanded = expandedAssignment === a.id;
+              return (
+                <Card key={a.id} className="rounded-2xl border-neutral-200/80 p-7">
+                  <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">
+                    {a.assignment_name}
+                  </p>
+                  {a.score !== null && a.score !== undefined ? (
+                    <>
+                      <p className="text-4xl font-semibold mt-2 tabular-nums">
+                        {a.score}
+                        <span className="text-neutral-300 text-2xl">/{total}</span>
+                      </p>
+                      <div className="h-2 bg-neutral-100 rounded-full overflow-hidden mt-4">
+                        <div
+                          className="h-full rounded-full"
+                          style={{ width: `${(a.score / total) * 100}%`, backgroundColor: color }}
+                        />
+                      </div>
+                      <p className="text-sm mt-3 font-medium" style={{ color }}>
+                        {a.passed ? "✓ Pass" : "✗ Needs Improvement"}
+                      </p>
+                      {a.recording_url && (
+                        <a
+                          href={a.recording_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-blue-600 hover:underline mt-2 inline-block"
+                        >
+                          View submission →
+                        </a>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-sm text-neutral-400 mt-2">Not attempted yet</p>
+                  )}
+                </Card>
+              );
+            })
+          ) : (
+            <Card className="rounded-2xl border-neutral-200/80 p-7">
+              <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Assignments</p>
+              <p className="text-sm text-neutral-400 mt-2">No assignments yet</p>
+            </Card>
+          )}
         </div>
       </div>
 
       {/* Lesson Activity */}
       <Card className="rounded-2xl border-neutral-200/80 p-7">
         <h2 className="text-xl font-semibold mb-1">Lesson activity</h2>
-        <p className="text-sm text-neutral-500 mb-6">
-          Watched lessons and time spent per video.
-        </p>
+        <p className="text-sm text-neutral-500 mb-6">Watched lessons and time spent per video.</p>
         <div className="space-y-6">
           {modules.map((mod) => (
             <div key={mod.id}>
@@ -315,18 +231,13 @@ export default function TraineeDetail() {
                   return (
                     <li key={l.id} className="px-4 py-3 flex items-center gap-3 text-sm">
                       {watched ? (
-                        <CheckCircle2
-                          className="h-4 w-4 flex-shrink-0"
-                          style={{ color: "#E05A2B" }}
-                        />
+                        <CheckCircle2 className="h-4 w-4 flex-shrink-0" style={{ color: "#E05A2B" }} />
                       ) : (
                         <Circle className="h-4 w-4 text-neutral-300 flex-shrink-0" />
                       )}
                       <div className="flex-1 min-w-0">
                         <p className="truncate">{l.title}</p>
-                        <p className="text-xs text-neutral-400">
-                          {l.day} · {l.kind}
-                        </p>
+                        <p className="text-xs text-neutral-400">{l.day} · {l.kind}</p>
                       </div>
                       <span className="text-xs text-neutral-500 tabular-nums">
                         {fmtMinutes(p?.watch_seconds || 0)}
