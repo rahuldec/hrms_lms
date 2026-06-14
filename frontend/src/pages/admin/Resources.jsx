@@ -24,7 +24,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, ExternalLink, FolderPlus, Link2 } from "lucide-react";
+import { Plus, Pencil, Trash2, ExternalLink, FolderPlus, Link2, X } from "lucide-react";
 
 const navItems = [
   { to: "/admin", label: "Dashboard", testId: "nav-dashboard" },
@@ -35,8 +35,20 @@ const navItems = [
 
 const errMsg = (e) => e?.response?.data?.detail || e?.message || "Operation failed";
 
-const emptyLinkForm = { title: "", url: "", description: "" };
+const emptyLinkForm = { title: "", urls: [""], description: "" };
 const emptyCatForm = { name: "" };
+
+const ensureHttps = (url) => {
+  if (!url.trim()) return "";
+  return url.startsWith("http") ? url : `https://${url}`;
+};
+
+// Parse urls field — could be array (new) or string (old single url)
+const parseUrls = (link) => {
+  if (Array.isArray(link.urls) && link.urls.length > 0) return link.urls;
+  if (link.url) return [link.url];
+  return [""];
+};
 
 export default function Resources() {
   const [categories, setCategories] = useState([]);
@@ -117,6 +129,22 @@ export default function Resources() {
     }
   };
 
+  // --- URL field helpers ---
+  const setUrl = (index, value) => {
+    const urls = [...linkForm.urls];
+    urls[index] = value;
+    setLinkForm({ ...linkForm, urls });
+  };
+
+  const addUrl = () => {
+    setLinkForm({ ...linkForm, urls: [...linkForm.urls, ""] });
+  };
+
+  const removeUrl = (index) => {
+    const urls = linkForm.urls.filter((_, i) => i !== index);
+    setLinkForm({ ...linkForm, urls: urls.length ? urls : [""] });
+  };
+
   // --- Link handlers ---
   const openCreateLink = (categoryId) => {
     setEditingLink(null);
@@ -130,7 +158,7 @@ export default function Resources() {
     setLinkCategoryId(categoryId);
     setLinkForm({
       title: link.title || "",
-      url: link.url || "",
+      urls: parseUrls(link),
       description: link.description || "",
     });
     setLinkModalOpen(true);
@@ -139,24 +167,21 @@ export default function Resources() {
   const saveLink = async (e) => {
     e?.preventDefault?.();
     if (!linkForm.title.trim()) { toast.error("Title required"); return; }
-    if (!linkForm.url.trim()) { toast.error("URL required"); return; }
-    const url = linkForm.url.startsWith("http") ? linkForm.url : `https://${linkForm.url}`;
+    const cleanUrls = linkForm.urls.map(ensureHttps).filter(Boolean);
+    if (cleanUrls.length === 0) { toast.error("At least one URL required"); return; }
     setSavingLink(true);
     try {
+      const payload = {
+        title: linkForm.title,
+        urls: cleanUrls,
+        url: cleanUrls[0], // keep for backward compat
+        description: linkForm.description,
+      };
       if (editingLink) {
-        await api.updateResourceLink(editingLink.id, {
-          title: linkForm.title,
-          url,
-          description: linkForm.description,
-        });
+        await api.updateResourceLink(editingLink.id, payload);
         toast.success("Link updated");
       } else {
-        await api.createResourceLink({
-          category_id: linkCategoryId,
-          title: linkForm.title,
-          url,
-          description: linkForm.description,
-        });
+        await api.createResourceLink({ category_id: linkCategoryId, ...payload });
         toast.success("Link added");
       }
       setLinkModalOpen(false);
@@ -264,48 +289,56 @@ export default function Resources() {
                 </div>
               ) : (
                 <div className="divide-y divide-neutral-100">
-                  {(cat.links || []).map((link) => (
-                    <div key={link.id} className="flex items-center justify-between py-3 group">
-                      <div className="flex items-start gap-3 min-w-0">
-                        <div className="h-8 w-8 rounded-lg bg-neutral-100 grid place-items-center flex-shrink-0 mt-0.5">
-                          <Link2 className="h-4 w-4 text-neutral-400" />
+                  {(cat.links || []).map((link) => {
+                    const urls = parseUrls(link);
+                    return (
+                      <div key={link.id} className="flex items-start justify-between py-3 group">
+                        <div className="flex items-start gap-3 min-w-0 flex-1">
+                          <div className="h-8 w-8 rounded-lg bg-neutral-100 grid place-items-center flex-shrink-0 mt-0.5">
+                            <Link2 className="h-4 w-4 text-neutral-400" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-neutral-900 mb-1">{link.title}</p>
+                            {link.description && (
+                              <p className="text-xs text-neutral-500 mb-1.5">{link.description}</p>
+                            )}
+                            <div className="flex flex-col gap-1">
+                              {urls.filter(Boolean).map((u, i) => (
+                                <a
+                                  key={i}
+                                  href={u}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline truncate max-w-sm"
+                                >
+                                  <ExternalLink className="h-3 w-3 flex-shrink-0" />
+                                  {u}
+                                </a>
+                              ))}
+                            </div>
+                          </div>
                         </div>
-                        <div className="min-w-0">
-                          <a
-                            href={link.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sm font-medium text-neutral-900 hover:underline inline-flex items-center gap-1"
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-4 flex-shrink-0">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => openEditLink(link, cat.id)}
+                            className="rounded-full h-7 w-7"
                           >
-                            {link.title}
-                            <ExternalLink className="h-3 w-3 text-neutral-400" />
-                          </a>
-                          {link.description && (
-                            <p className="text-xs text-neutral-500 mt-0.5 truncate">{link.description}</p>
-                          )}
-                          <p className="text-xs text-neutral-400 mt-0.5 truncate max-w-sm">{link.url}</p>
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => setConfirmDeleteLink(link)}
+                            className="rounded-full h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-50"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-4 flex-shrink-0">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() => openEditLink(link, cat.id)}
-                          className="rounded-full h-7 w-7"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() => setConfirmDeleteLink(link)}
-                          className="rounded-full h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-50"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </Card>
@@ -356,7 +389,7 @@ export default function Resources() {
           <DialogHeader>
             <DialogTitle>{editingLink ? "Edit link" : "Add link"}</DialogTitle>
             <DialogDescription>
-              {editingLink ? "Update this link." : "Add a new link to this category."}
+              {editingLink ? "Update this link." : "Add a new link entry with one or more URLs."}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={saveLink} className="space-y-4">
@@ -366,19 +399,46 @@ export default function Resources() {
                 value={linkForm.title}
                 onChange={(e) => setLinkForm({ ...linkForm, title: e.target.value })}
                 className="h-10 rounded-xl mt-1"
-                placeholder="e.g. SIS User Manual"
+                placeholder="e.g. SIS Assignment"
                 autoFocus
               />
             </div>
+
             <div>
-              <Label className="text-xs text-neutral-600">URL</Label>
-              <Input
-                value={linkForm.url}
-                onChange={(e) => setLinkForm({ ...linkForm, url: e.target.value })}
-                className="h-10 rounded-xl mt-1"
-                placeholder="https://..."
-              />
+              <div className="flex items-center justify-between mb-1">
+                <Label className="text-xs text-neutral-600">URLs</Label>
+                <button
+                  type="button"
+                  onClick={addUrl}
+                  className="text-xs flex items-center gap-1 font-medium"
+                  style={{ color: "#E05A2B" }}
+                >
+                  <Plus className="h-3 w-3" /> Add another URL
+                </button>
+              </div>
+              <div className="space-y-2">
+                {linkForm.urls.map((u, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Input
+                      value={u}
+                      onChange={(e) => setUrl(i, e.target.value)}
+                      className="h-10 rounded-xl"
+                      placeholder="https://..."
+                    />
+                    {linkForm.urls.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeUrl(i)}
+                        className="h-8 w-8 rounded-full flex items-center justify-center text-neutral-400 hover:text-red-500 hover:bg-red-50 flex-shrink-0"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
+
             <div>
               <Label className="text-xs text-neutral-600">Description <span className="text-neutral-400">(optional)</span></Label>
               <Input
@@ -388,6 +448,7 @@ export default function Resources() {
                 placeholder="Brief note about this link"
               />
             </div>
+
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setLinkModalOpen(false)} className="rounded-full">
                 Cancel
