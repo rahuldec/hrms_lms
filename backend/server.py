@@ -1,11 +1,4 @@
-"""FastAPI backend that wraps Supabase admin operations using service_role key.
-
-The frontend authenticates with Supabase directly (Supabase Auth + anon key).
-For any write that requires bypassing RLS (creating trainees, assigning roles,
-updating progress, deleting users), the frontend calls these endpoints with
-its Supabase access token. The backend verifies the token and uses the
-service_role key to perform privileged operations. 
-"""
+"""FastAPI backend that wraps Supabase admin operations using service_role key."""
 
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,13 +32,12 @@ ADMIN_HEADERS = {
 logger = logging.getLogger("training-api")
 logging.basicConfig(level=logging.INFO)
 
-# ---------- Zoho report URLs ----------
 ZOHO_REPORTS = {
     "SIS": "https://forms.zohopublic.in/odforms1/report/SIS/reportperma/4tMQi4s1xd13XlzrERR2J42hJWZbE6VznPPcwaz9xQ0",
     "Fee Module": "https://forms.zohopublic.in/odforms1/report/FeeModuleAssignment/reportperma/_x9CwE0qH6Xr5XGb55H_oStvU0M6uUjrZr9mLsNyHuA",
 }
 
-PASS_THRESHOLD = 9   # score >= 9 out of 50 is Pass
+PASS_THRESHOLD = 9
 
 app = FastAPI()
 api = APIRouter(prefix="/api")
@@ -108,7 +100,6 @@ async def fetch_zoho_score(assignment_name: str, trainee_name: str) -> Optional[
             return None
 
         html = r.text
-
         th_matches = re.findall(r'<th[^>]*>(.*?)</th>', html, re.IGNORECASE | re.DOTALL)
         headers_clean = [re.sub(r'<[^>]+>', '', h).strip() for h in th_matches]
 
@@ -217,13 +208,15 @@ class ResourceCategoryUpdate(BaseModel):
 class ResourceLinkIn(BaseModel):
     category_id: str
     title: str
-    url: str
+    url: Optional[str] = ""
+    urls: Optional[List[str]] = []
     description: Optional[str] = ""
 
 
 class ResourceLinkUpdate(BaseModel):
     title: Optional[str] = None
     url: Optional[str] = None
+    urls: Optional[List[str]] = None
     description: Optional[str] = None
 
 
@@ -237,10 +230,7 @@ async def root():
 async def setup_init():
     email = f"{ADMIN_USERNAME}@odk.local"
     async with httpx.AsyncClient(timeout=20) as cx:
-        r = await cx.get(
-            f"{AUTH}/admin/users?per_page=200",
-            headers=ADMIN_HEADERS,
-        )
+        r = await cx.get(f"{AUTH}/admin/users?per_page=200", headers=ADMIN_HEADERS)
         if r.status_code != 200:
             raise HTTPException(status_code=500, detail=f"List users failed: {r.text}")
         users = r.json().get("users", [])
@@ -249,11 +239,7 @@ async def setup_init():
             r = await cx.post(
                 f"{AUTH}/admin/users",
                 headers=ADMIN_HEADERS,
-                json={
-                    "email": email,
-                    "password": ADMIN_PASSWORD,
-                    "email_confirm": True,
-                },
+                json={"email": email, "password": ADMIN_PASSWORD, "email_confirm": True},
             )
             if r.status_code not in (200, 201):
                 raise HTTPException(status_code=500, detail=f"Create admin failed: {r.text}")
@@ -261,23 +247,12 @@ async def setup_init():
             created = True
         else:
             user_id = existing["id"]
-            await cx.put(
-                f"{AUTH}/admin/users/{user_id}",
-                headers=ADMIN_HEADERS,
-                json={"password": ADMIN_PASSWORD},
-            )
+            await cx.put(f"{AUTH}/admin/users/{user_id}", headers=ADMIN_HEADERS, json={"password": ADMIN_PASSWORD})
             created = False
 
-        rr = await cx.get(
-            f"{REST}/user_roles?user_id=eq.{user_id}&select=id",
-            headers=ADMIN_HEADERS,
-        )
+        rr = await cx.get(f"{REST}/user_roles?user_id=eq.{user_id}&select=id", headers=ADMIN_HEADERS)
         if rr.status_code == 200 and len(rr.json()) == 0:
-            await cx.post(
-                f"{REST}/user_roles",
-                headers=ADMIN_HEADERS,
-                json={"user_id": user_id, "role": "admin"},
-            )
+            await cx.post(f"{REST}/user_roles", headers=ADMIN_HEADERS, json={"user_id": user_id, "role": "admin"})
 
     return {"ok": True, "created": created, "admin_user_id": user_id}
 
@@ -290,10 +265,7 @@ async def me(ctx=Depends(require_user)):
     trainee = None
     if role == "trainee":
         async with httpx.AsyncClient(timeout=15) as cx:
-            r = await cx.get(
-                f"{REST}/trainees?auth_user_id=eq.{user['id']}&select=*",
-                headers=ADMIN_HEADERS,
-            )
+            r = await cx.get(f"{REST}/trainees?auth_user_id=eq.{user['id']}&select=*", headers=ADMIN_HEADERS)
             rows = r.json() if r.status_code == 200 else []
             trainee = rows[0] if rows else None
     return {"user_id": user["id"], "email": user.get("email"), "role": role, "trainee": trainee}
@@ -303,10 +275,7 @@ async def me(ctx=Depends(require_user)):
 @api.get("/admin/trainees")
 async def list_trainees(_=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=20) as cx:
-        r = await cx.get(
-            f"{REST}/trainees?select=*&order=created_at.desc",
-            headers=ADMIN_HEADERS,
-        )
+        r = await cx.get(f"{REST}/trainees?select=*&order=created_at.desc", headers=ADMIN_HEADERS)
     return r.json()
 
 
@@ -315,21 +284,14 @@ async def create_trainee(body: TraineeIn, _=Depends(require_admin)):
     username = body.username.strip().lower()
     email = f"{username}@trainee.local"
     async with httpx.AsyncClient(timeout=30) as cx:
-        existing_r = await cx.get(
-            f"{REST}/trainees?username=eq.{username}&select=id",
-            headers=ADMIN_HEADERS,
-        )
+        existing_r = await cx.get(f"{REST}/trainees?username=eq.{username}&select=id", headers=ADMIN_HEADERS)
         if existing_r.status_code == 200 and len(existing_r.json()) > 0:
             raise HTTPException(status_code=400, detail="Username already taken")
 
         r = await cx.post(
             f"{AUTH}/admin/users",
             headers=ADMIN_HEADERS,
-            json={
-                "email": email,
-                "password": body.password,
-                "email_confirm": True,
-            },
+            json={"email": email, "password": body.password, "email_confirm": True},
         )
         if r.status_code not in (200, 201):
             raise HTTPException(status_code=400, detail=f"Auth create failed: {r.text}")
@@ -348,29 +310,15 @@ async def create_trainee(body: TraineeIn, _=Depends(require_admin)):
             "auth_user_id": auth_user_id,
             "current_level": 0,
             "batch_id": body.batch_id or None,
-            "history": [
-                {
-                    "type": "joined",
-                    "level": 0,
-                    "at": datetime.now(timezone.utc).isoformat(),
-                }
-            ],
+            "history": [{"type": "joined", "level": 0, "at": datetime.now(timezone.utc).isoformat()}],
         }
-        r2 = await cx.post(
-            f"{REST}/trainees",
-            headers={**ADMIN_HEADERS, "Prefer": "return=representation"},
-            json=payload,
-        )
+        r2 = await cx.post(f"{REST}/trainees", headers={**ADMIN_HEADERS, "Prefer": "return=representation"}, json=payload)
         if r2.status_code not in (200, 201):
             await cx.delete(f"{AUTH}/admin/users/{auth_user_id}", headers=ADMIN_HEADERS)
             raise HTTPException(status_code=400, detail=f"Trainee insert failed: {r2.text}")
         trainee = r2.json()[0]
 
-        await cx.post(
-            f"{REST}/user_roles",
-            headers=ADMIN_HEADERS,
-            json={"user_id": auth_user_id, "role": "trainee"},
-        )
+        await cx.post(f"{REST}/user_roles", headers=ADMIN_HEADERS, json={"user_id": auth_user_id, "role": "trainee"})
 
     return trainee
 
@@ -396,47 +344,26 @@ async def update_trainee(trainee_id: str, body: TraineeUpdate, _=Depends(require
 @api.delete("/admin/trainees/{trainee_id}")
 async def delete_trainee(trainee_id: str, _=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=20) as cx:
-        r = await cx.get(
-            f"{REST}/trainees?id=eq.{trainee_id}&select=*",
-            headers=ADMIN_HEADERS,
-        )
+        r = await cx.get(f"{REST}/trainees?id=eq.{trainee_id}&select=*", headers=ADMIN_HEADERS)
         rows = r.json() if r.status_code == 200 else []
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
         t = rows[0]
         auth_user_id = t.get("auth_user_id")
 
-        await cx.delete(
-            f"{REST}/lesson_progress?trainee_id=eq.{trainee_id}",
-            headers=ADMIN_HEADERS,
-        )
-        await cx.delete(
-            f"{REST}/assignments?trainee_id=eq.{trainee_id}",
-            headers=ADMIN_HEADERS,
-        )
-        await cx.delete(
-            f"{REST}/trainees?id=eq.{trainee_id}",
-            headers=ADMIN_HEADERS,
-        )
+        await cx.delete(f"{REST}/lesson_progress?trainee_id=eq.{trainee_id}", headers=ADMIN_HEADERS)
+        await cx.delete(f"{REST}/assignments?trainee_id=eq.{trainee_id}", headers=ADMIN_HEADERS)
+        await cx.delete(f"{REST}/trainees?id=eq.{trainee_id}", headers=ADMIN_HEADERS)
         if auth_user_id:
-            await cx.delete(
-                f"{REST}/user_roles?user_id=eq.{auth_user_id}",
-                headers=ADMIN_HEADERS,
-            )
-            await cx.delete(
-                f"{AUTH}/admin/users/{auth_user_id}",
-                headers=ADMIN_HEADERS,
-            )
+            await cx.delete(f"{REST}/user_roles?user_id=eq.{auth_user_id}", headers=ADMIN_HEADERS)
+            await cx.delete(f"{AUTH}/admin/users/{auth_user_id}", headers=ADMIN_HEADERS)
     return {"ok": True}
 
 
 @api.post("/admin/trainees/{trainee_id}/promote")
 async def promote_trainee(trainee_id: str, _=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=20) as cx:
-        r = await cx.get(
-            f"{REST}/trainees?id=eq.{trainee_id}&select=*",
-            headers=ADMIN_HEADERS,
-        )
+        r = await cx.get(f"{REST}/trainees?id=eq.{trainee_id}&select=*", headers=ADMIN_HEADERS)
         rows = r.json() if r.status_code == 200 else []
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
@@ -448,14 +375,7 @@ async def promote_trainee(trainee_id: str, _=Depends(require_admin)):
         history = t.get("history") or []
         if not isinstance(history, list):
             history = []
-        history.append(
-            {
-                "type": "promotion",
-                "from": current,
-                "to": next_level,
-                "at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
+        history.append({"type": "promotion", "from": current, "to": next_level, "at": datetime.now(timezone.utc).isoformat()})
         today = datetime.now(timezone.utc).date().isoformat()
         r2 = await cx.patch(
             f"{REST}/trainees?id=eq.{trainee_id}",
@@ -470,21 +390,12 @@ async def promote_trainee(trainee_id: str, _=Depends(require_admin)):
 @api.get("/admin/trainees/{trainee_id}")
 async def get_trainee(trainee_id: str, _=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=20) as cx:
-        r = await cx.get(
-            f"{REST}/trainees?id=eq.{trainee_id}&select=*",
-            headers=ADMIN_HEADERS,
-        )
+        r = await cx.get(f"{REST}/trainees?id=eq.{trainee_id}&select=*", headers=ADMIN_HEADERS)
         rows = r.json() if r.status_code == 200 else []
         if not rows:
             raise HTTPException(status_code=404, detail="Not found")
-        p = await cx.get(
-            f"{REST}/lesson_progress?trainee_id=eq.{trainee_id}&select=*",
-            headers=ADMIN_HEADERS,
-        )
-        a = await cx.get(
-            f"{REST}/assignments?trainee_id=eq.{trainee_id}&select=*&order=created_at.desc",
-            headers=ADMIN_HEADERS,
-        )
+        p = await cx.get(f"{REST}/lesson_progress?trainee_id=eq.{trainee_id}&select=*", headers=ADMIN_HEADERS)
+        a = await cx.get(f"{REST}/assignments?trainee_id=eq.{trainee_id}&select=*&order=created_at.desc", headers=ADMIN_HEADERS)
     return {
         "trainee": rows[0],
         "progress": p.json() if p.status_code == 200 else [],
@@ -496,20 +407,14 @@ async def get_trainee(trainee_id: str, _=Depends(require_admin)):
 @api.get("/admin/assignments/{trainee_id}")
 async def list_assignments(trainee_id: str, _=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=20) as cx:
-        r = await cx.get(
-            f"{REST}/assignments?trainee_id=eq.{trainee_id}&select=*&order=created_at.desc",
-            headers=ADMIN_HEADERS,
-        )
+        r = await cx.get(f"{REST}/assignments?trainee_id=eq.{trainee_id}&select=*&order=created_at.desc", headers=ADMIN_HEADERS)
     return r.json() if r.status_code == 200 else []
 
 
 @api.post("/admin/assignments/{trainee_id}")
 async def upsert_assignment(trainee_id: str, body: AssignmentScoreIn, _=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=20) as cx:
-        tr = await cx.get(
-            f"{REST}/trainees?id=eq.{trainee_id}&select=name",
-            headers=ADMIN_HEADERS,
-        )
+        tr = await cx.get(f"{REST}/trainees?id=eq.{trainee_id}&select=name", headers=ADMIN_HEADERS)
         rows = tr.json() if tr.status_code == 200 else []
         if not rows:
             raise HTTPException(status_code=404, detail="Trainee not found")
@@ -522,11 +427,7 @@ async def upsert_assignment(trainee_id: str, body: AssignmentScoreIn, _=Depends(
         score = await fetch_zoho_score(body.assignment_name, trainee_name)
         source = "zoho"
         if score is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Could not find score for '{trainee_name}' in Zoho report '{body.assignment_name}'. "
-                       f"Please enter score manually."
-            )
+            raise HTTPException(status_code=404, detail=f"Could not find score for '{trainee_name}' in Zoho report '{body.assignment_name}'. Please enter score manually.")
 
     passed = score >= PASS_THRESHOLD
     now = datetime.now(timezone.utc).isoformat()
@@ -559,15 +460,10 @@ async def upsert_assignment(trainee_id: str, body: AssignmentScoreIn, _=Depends(
         else:
             payload["created_at"] = now
             payload["recording_url"] = None
-            r2 = await cx.post(
-                f"{REST}/assignments",
-                headers={**ADMIN_HEADERS, "Prefer": "return=representation"},
-                json=payload,
-            )
+            r2 = await cx.post(f"{REST}/assignments", headers={**ADMIN_HEADERS, "Prefer": "return=representation"}, json=payload)
 
     if r2.status_code not in (200, 201, 204):
         raise HTTPException(status_code=400, detail=r2.text)
-
     result = r2.json()[0] if r2.json() else payload
     return {**result, "passed": passed, "score": score, "total_marks": 50}
 
@@ -580,7 +476,6 @@ async def update_recording(trainee_id: str, assignment_name: str, body: Recordin
             headers=ADMIN_HEADERS,
         )
         existing = existing_r.json()[0] if existing_r.status_code == 200 and existing_r.json() else None
-
         now = datetime.now(timezone.utc).isoformat()
 
         if existing:
@@ -614,10 +509,7 @@ async def update_recording(trainee_id: str, assignment_name: str, body: Recordin
 @api.get("/admin/assignments/{trainee_id}/{assignment_name}/zoho-fetch")
 async def fetch_score_from_zoho(trainee_id: str, assignment_name: str, _=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=20) as cx:
-        tr = await cx.get(
-            f"{REST}/trainees?id=eq.{trainee_id}&select=name",
-            headers=ADMIN_HEADERS,
-        )
+        tr = await cx.get(f"{REST}/trainees?id=eq.{trainee_id}&select=name", headers=ADMIN_HEADERS)
         rows = tr.json() if tr.status_code == 200 else []
         if not rows:
             raise HTTPException(status_code=404, detail="Trainee not found")
@@ -625,23 +517,10 @@ async def fetch_score_from_zoho(trainee_id: str, assignment_name: str, _=Depends
 
     score = await fetch_zoho_score(assignment_name, trainee_name)
     if score is None:
-        return {
-            "found": False,
-            "trainee_name": trainee_name,
-            "assignment_name": assignment_name,
-            "message": f"No submission found for '{trainee_name}' in Zoho report.",
-        }
+        return {"found": False, "trainee_name": trainee_name, "assignment_name": assignment_name, "message": f"No submission found for '{trainee_name}' in Zoho report."}
 
     passed = score >= PASS_THRESHOLD
-    return {
-        "found": True,
-        "trainee_name": trainee_name,
-        "assignment_name": assignment_name,
-        "score": score,
-        "total_marks": 50,
-        "passed": passed,
-        "pass_threshold": PASS_THRESHOLD,
-    }
+    return {"found": True, "trainee_name": trainee_name, "assignment_name": assignment_name, "score": score, "total_marks": 50, "passed": passed, "pass_threshold": PASS_THRESHOLD}
 
 
 @api.get("/admin/assignments-list")
@@ -653,10 +532,7 @@ async def get_assignments_list(_=Depends(require_admin)):
 @api.get("/admin/batches")
 async def list_batches(_=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=20) as cx:
-        r = await cx.get(
-            f"{REST}/batches?select=*&order=created_at.desc",
-            headers=ADMIN_HEADERS,
-        )
+        r = await cx.get(f"{REST}/batches?select=*&order=created_at.desc", headers=ADMIN_HEADERS)
     return r.json()
 
 
@@ -666,12 +542,7 @@ async def create_batch(body: BatchIn, _=Depends(require_admin)):
         r = await cx.post(
             f"{REST}/batches",
             headers={**ADMIN_HEADERS, "Prefer": "return=representation"},
-            json={
-                "name": body.name,
-                "start_date": body.start_date or None,
-                "status": body.status or "Active",
-                "notes": body.notes or "",
-            },
+            json={"name": body.name, "start_date": body.start_date or None, "status": body.status or "Active", "notes": body.notes or ""},
         )
     if r.status_code not in (200, 201):
         raise HTTPException(status_code=400, detail=r.text)
@@ -697,32 +568,19 @@ async def update_batch(batch_id: str, body: BatchUpdate, _=Depends(require_admin
 @api.delete("/admin/batches/{batch_id}")
 async def delete_batch(batch_id: str, _=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=20) as cx:
-        await cx.patch(
-            f"{REST}/trainees?batch_id=eq.{batch_id}",
-            headers=ADMIN_HEADERS,
-            json={"batch_id": None},
-        )
-        await cx.delete(
-            f"{REST}/batches?id=eq.{batch_id}",
-            headers=ADMIN_HEADERS,
-        )
+        await cx.patch(f"{REST}/trainees?batch_id=eq.{batch_id}", headers=ADMIN_HEADERS, json={"batch_id": None})
+        await cx.delete(f"{REST}/batches?id=eq.{batch_id}", headers=ADMIN_HEADERS)
     return {"ok": True}
 
 
 @api.get("/admin/batches/{batch_id}")
 async def get_batch(batch_id: str, _=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=20) as cx:
-        rb = await cx.get(
-            f"{REST}/batches?id=eq.{batch_id}&select=*",
-            headers=ADMIN_HEADERS,
-        )
+        rb = await cx.get(f"{REST}/batches?id=eq.{batch_id}&select=*", headers=ADMIN_HEADERS)
         rows = rb.json() if rb.status_code == 200 else []
         if not rows:
             raise HTTPException(status_code=404, detail="Batch not found")
-        rt = await cx.get(
-            f"{REST}/trainees?batch_id=eq.{batch_id}&select=*&order=created_at.desc",
-            headers=ADMIN_HEADERS,
-        )
+        rt = await cx.get(f"{REST}/trainees?batch_id=eq.{batch_id}&select=*&order=created_at.desc", headers=ADMIN_HEADERS)
         trainees = rt.json() if rt.status_code == 200 else []
     return {"batch": rows[0], "trainees": trainees}
 
@@ -743,23 +601,13 @@ async def assign_batch(trainee_id: str, body: AssignBatchIn, _=Depends(require_a
 # ---------- admin resources ----------
 @api.get("/admin/resources")
 async def list_resources(_=Depends(require_admin)):
-    """Return all categories with their links nested inside."""
     async with httpx.AsyncClient(timeout=20) as cx:
-        rc = await cx.get(
-            f"{REST}/resource_categories?select=*&order=created_at.asc",
-            headers=ADMIN_HEADERS,
-        )
-        rl = await cx.get(
-            f"{REST}/resource_links?select=*&order=created_at.asc",
-            headers=ADMIN_HEADERS,
-        )
+        rc = await cx.get(f"{REST}/resource_categories?select=*&order=created_at.asc", headers=ADMIN_HEADERS)
+        rl = await cx.get(f"{REST}/resource_links?select=*&order=created_at.asc", headers=ADMIN_HEADERS)
     categories = rc.json() if rc.status_code == 200 else []
     links = rl.json() if rl.status_code == 200 else []
-
-    # Nest links inside their category
     for cat in categories:
         cat["links"] = [l for l in links if l.get("category_id") == cat["id"]]
-
     return categories
 
 
@@ -791,21 +639,16 @@ async def update_resource_category(category_id: str, body: ResourceCategoryUpdat
 
 @api.delete("/admin/resources/categories/{category_id}")
 async def delete_resource_category(category_id: str, _=Depends(require_admin)):
-    """Deletes category and all its links (cascade handled by DB or we delete manually)."""
     async with httpx.AsyncClient(timeout=20) as cx:
-        await cx.delete(
-            f"{REST}/resource_links?category_id=eq.{category_id}",
-            headers=ADMIN_HEADERS,
-        )
-        await cx.delete(
-            f"{REST}/resource_categories?id=eq.{category_id}",
-            headers=ADMIN_HEADERS,
-        )
+        await cx.delete(f"{REST}/resource_links?category_id=eq.{category_id}", headers=ADMIN_HEADERS)
+        await cx.delete(f"{REST}/resource_categories?id=eq.{category_id}", headers=ADMIN_HEADERS)
     return {"ok": True}
 
 
 @api.post("/admin/resources/links")
 async def create_resource_link(body: ResourceLinkIn, _=Depends(require_admin)):
+    urls = body.urls if body.urls else ([body.url] if body.url else [])
+    primary_url = urls[0] if urls else ""
     async with httpx.AsyncClient(timeout=20) as cx:
         r = await cx.post(
             f"{REST}/resource_links",
@@ -813,7 +656,8 @@ async def create_resource_link(body: ResourceLinkIn, _=Depends(require_admin)):
             json={
                 "category_id": body.category_id,
                 "title": body.title,
-                "url": body.url,
+                "url": primary_url,
+                "urls": urls,
                 "description": body.description or "",
             },
         )
@@ -824,7 +668,16 @@ async def create_resource_link(body: ResourceLinkIn, _=Depends(require_admin)):
 
 @api.put("/admin/resources/links/{link_id}")
 async def update_resource_link(link_id: str, body: ResourceLinkUpdate, _=Depends(require_admin)):
-    patch = {k: v for k, v in body.dict().items() if v is not None}
+    patch = {}
+    if body.title is not None:
+        patch["title"] = body.title
+    if body.description is not None:
+        patch["description"] = body.description
+    if body.urls is not None:
+        patch["urls"] = body.urls
+        patch["url"] = body.urls[0] if body.urls else ""
+    elif body.url is not None:
+        patch["url"] = body.url
     if not patch:
         raise HTTPException(status_code=400, detail="No fields to update")
     async with httpx.AsyncClient(timeout=20) as cx:
@@ -841,10 +694,7 @@ async def update_resource_link(link_id: str, body: ResourceLinkUpdate, _=Depends
 @api.delete("/admin/resources/links/{link_id}")
 async def delete_resource_link(link_id: str, _=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=20) as cx:
-        await cx.delete(
-            f"{REST}/resource_links?id=eq.{link_id}",
-            headers=ADMIN_HEADERS,
-        )
+        await cx.delete(f"{REST}/resource_links?id=eq.{link_id}", headers=ADMIN_HEADERS)
     return {"ok": True}
 
 
@@ -855,22 +705,13 @@ async def my_progress(ctx=Depends(require_user)):
         raise HTTPException(status_code=403, detail="Trainee only")
     user = ctx["user"]
     async with httpx.AsyncClient(timeout=20) as cx:
-        rt = await cx.get(
-            f"{REST}/trainees?auth_user_id=eq.{user['id']}&select=*",
-            headers=ADMIN_HEADERS,
-        )
+        rt = await cx.get(f"{REST}/trainees?auth_user_id=eq.{user['id']}&select=*", headers=ADMIN_HEADERS)
         rows = rt.json() if rt.status_code == 200 else []
         if not rows:
             return {"trainee": None, "progress": []}
         trainee = rows[0]
-        p = await cx.get(
-            f"{REST}/lesson_progress?trainee_id=eq.{trainee['id']}&select=*",
-            headers=ADMIN_HEADERS,
-        )
-        a = await cx.get(
-            f"{REST}/assignments?trainee_id=eq.{trainee['id']}&select=*&order=created_at.desc",
-            headers=ADMIN_HEADERS,
-        )
+        p = await cx.get(f"{REST}/lesson_progress?trainee_id=eq.{trainee['id']}&select=*", headers=ADMIN_HEADERS)
+        a = await cx.get(f"{REST}/assignments?trainee_id=eq.{trainee['id']}&select=*&order=created_at.desc", headers=ADMIN_HEADERS)
     return {
         "trainee": trainee,
         "progress": p.json() if p.status_code == 200 else [],
@@ -884,10 +725,7 @@ async def upsert_progress(body: ProgressIn, ctx=Depends(require_user)):
         raise HTTPException(status_code=403, detail="Trainee only")
     user = ctx["user"]
     async with httpx.AsyncClient(timeout=20) as cx:
-        rt = await cx.get(
-            f"{REST}/trainees?auth_user_id=eq.{user['id']}&select=id",
-            headers=ADMIN_HEADERS,
-        )
+        rt = await cx.get(f"{REST}/trainees?auth_user_id=eq.{user['id']}&select=id", headers=ADMIN_HEADERS)
         rows = rt.json() if rt.status_code == 200 else []
         if not rows:
             raise HTTPException(status_code=404, detail="Trainee not found")
