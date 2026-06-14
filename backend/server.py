@@ -111,8 +111,6 @@ async def fetch_zoho_score(assignment_name: str, trainee_name: str) -> Optional[
             if "overall score" in h.lower() or "score" in h.lower():
                 score_idx = i
 
-        logger.info(f"Zoho headers found: {headers_clean}, name_idx={name_idx}, score_idx={score_idx}")
-
         if name_idx is None or score_idx is None:
             logger.warning("Could not find Name/Score columns in Zoho report headers")
             return None
@@ -132,7 +130,6 @@ async def fetch_zoho_score(assignment_name: str, trainee_name: str) -> Optional[
                         logger.warning(f"Could not parse score '{raw_score}' for {trainee_name}")
                         return None
 
-        logger.info(f"Trainee '{trainee_name}' not found in Zoho report for '{assignment_name}'")
         return None
 
     except Exception as e:
@@ -209,14 +206,16 @@ class ResourceLinkIn(BaseModel):
     category_id: str
     title: str
     url: Optional[str] = ""
-    urls: Optional[List[str]] = []
+    urls: Optional[Any] = []
+    practice_sheet_url: Optional[str] = ""
     description: Optional[str] = ""
 
 
 class ResourceLinkUpdate(BaseModel):
     title: Optional[str] = None
     url: Optional[str] = None
-    urls: Optional[List[str]] = None
+    urls: Optional[Any] = None
+    practice_sheet_url: Optional[str] = None
     description: Optional[str] = None
 
 
@@ -317,7 +316,6 @@ async def create_trainee(body: TraineeIn, _=Depends(require_admin)):
             await cx.delete(f"{AUTH}/admin/users/{auth_user_id}", headers=ADMIN_HEADERS)
             raise HTTPException(status_code=400, detail=f"Trainee insert failed: {r2.text}")
         trainee = r2.json()[0]
-
         await cx.post(f"{REST}/user_roles", headers=ADMIN_HEADERS, json={"user_id": auth_user_id, "role": "trainee"})
 
     return trainee
@@ -350,7 +348,6 @@ async def delete_trainee(trainee_id: str, _=Depends(require_admin)):
             raise HTTPException(status_code=404, detail="Not found")
         t = rows[0]
         auth_user_id = t.get("auth_user_id")
-
         await cx.delete(f"{REST}/lesson_progress?trainee_id=eq.{trainee_id}", headers=ADMIN_HEADERS)
         await cx.delete(f"{REST}/assignments?trainee_id=eq.{trainee_id}", headers=ADMIN_HEADERS)
         await cx.delete(f"{REST}/trainees?id=eq.{trainee_id}", headers=ADMIN_HEADERS)
@@ -438,7 +435,6 @@ async def upsert_assignment(trainee_id: str, body: AssignmentScoreIn, _=Depends(
             headers=ADMIN_HEADERS,
         )
         existing = existing_r.json()[0] if existing_r.status_code == 200 and existing_r.json() else None
-
         payload = {
             "trainee_id": trainee_id,
             "assignment_name": body.assignment_name,
@@ -448,15 +444,10 @@ async def upsert_assignment(trainee_id: str, body: AssignmentScoreIn, _=Depends(
             "source": source,
             "updated_at": now,
         }
-
         if existing:
             if existing.get("recording_url"):
                 payload["recording_url"] = existing["recording_url"]
-            r2 = await cx.patch(
-                f"{REST}/assignments?id=eq.{existing['id']}",
-                headers={**ADMIN_HEADERS, "Prefer": "return=representation"},
-                json=payload,
-            )
+            r2 = await cx.patch(f"{REST}/assignments?id=eq.{existing['id']}", headers={**ADMIN_HEADERS, "Prefer": "return=representation"}, json=payload)
         else:
             payload["created_at"] = now
             payload["recording_url"] = None
@@ -477,30 +468,14 @@ async def update_recording(trainee_id: str, assignment_name: str, body: Recordin
         )
         existing = existing_r.json()[0] if existing_r.status_code == 200 and existing_r.json() else None
         now = datetime.now(timezone.utc).isoformat()
-
         if existing:
-            r = await cx.patch(
-                f"{REST}/assignments?id=eq.{existing['id']}",
-                headers={**ADMIN_HEADERS, "Prefer": "return=representation"},
-                json={"recording_url": body.recording_url, "updated_at": now},
-            )
+            r = await cx.patch(f"{REST}/assignments?id=eq.{existing['id']}", headers={**ADMIN_HEADERS, "Prefer": "return=representation"}, json={"recording_url": body.recording_url, "updated_at": now})
         else:
-            r = await cx.post(
-                f"{REST}/assignments",
-                headers={**ADMIN_HEADERS, "Prefer": "return=representation"},
-                json={
-                    "trainee_id": trainee_id,
-                    "assignment_name": assignment_name,
-                    "score": None,
-                    "total_marks": 50,
-                    "passed": None,
-                    "source": "manual",
-                    "recording_url": body.recording_url,
-                    "created_at": now,
-                    "updated_at": now,
-                },
-            )
-
+            r = await cx.post(f"{REST}/assignments", headers={**ADMIN_HEADERS, "Prefer": "return=representation"}, json={
+                "trainee_id": trainee_id, "assignment_name": assignment_name,
+                "score": None, "total_marks": 50, "passed": None, "source": "manual",
+                "recording_url": body.recording_url, "created_at": now, "updated_at": now,
+            })
     if r.status_code not in (200, 201, 204):
         raise HTTPException(status_code=400, detail=r.text)
     return r.json()[0] if r.json() else {"ok": True}
@@ -514,11 +489,9 @@ async def fetch_score_from_zoho(trainee_id: str, assignment_name: str, _=Depends
         if not rows:
             raise HTTPException(status_code=404, detail="Trainee not found")
         trainee_name = rows[0]["name"]
-
     score = await fetch_zoho_score(assignment_name, trainee_name)
     if score is None:
         return {"found": False, "trainee_name": trainee_name, "assignment_name": assignment_name, "message": f"No submission found for '{trainee_name}' in Zoho report."}
-
     passed = score >= PASS_THRESHOLD
     return {"found": True, "trainee_name": trainee_name, "assignment_name": assignment_name, "score": score, "total_marks": 50, "passed": passed, "pass_threshold": PASS_THRESHOLD}
 
@@ -539,11 +512,8 @@ async def list_batches(_=Depends(require_admin)):
 @api.post("/admin/batches")
 async def create_batch(body: BatchIn, _=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=20) as cx:
-        r = await cx.post(
-            f"{REST}/batches",
-            headers={**ADMIN_HEADERS, "Prefer": "return=representation"},
-            json={"name": body.name, "start_date": body.start_date or None, "status": body.status or "Active", "notes": body.notes or ""},
-        )
+        r = await cx.post(f"{REST}/batches", headers={**ADMIN_HEADERS, "Prefer": "return=representation"},
+            json={"name": body.name, "start_date": body.start_date or None, "status": body.status or "Active", "notes": body.notes or ""})
     if r.status_code not in (200, 201):
         raise HTTPException(status_code=400, detail=r.text)
     return r.json()[0]
@@ -555,11 +525,7 @@ async def update_batch(batch_id: str, body: BatchUpdate, _=Depends(require_admin
     if not patch:
         raise HTTPException(status_code=400, detail="No fields to update")
     async with httpx.AsyncClient(timeout=20) as cx:
-        r = await cx.patch(
-            f"{REST}/batches?id=eq.{batch_id}",
-            headers={**ADMIN_HEADERS, "Prefer": "return=representation"},
-            json=patch,
-        )
+        r = await cx.patch(f"{REST}/batches?id=eq.{batch_id}", headers={**ADMIN_HEADERS, "Prefer": "return=representation"}, json=patch)
     if r.status_code not in (200, 204):
         raise HTTPException(status_code=400, detail=r.text)
     return r.json()[0] if r.json() else {"ok": True}
@@ -581,18 +547,13 @@ async def get_batch(batch_id: str, _=Depends(require_admin)):
         if not rows:
             raise HTTPException(status_code=404, detail="Batch not found")
         rt = await cx.get(f"{REST}/trainees?batch_id=eq.{batch_id}&select=*&order=created_at.desc", headers=ADMIN_HEADERS)
-        trainees = rt.json() if rt.status_code == 200 else []
-    return {"batch": rows[0], "trainees": trainees}
+    return {"batch": rows[0], "trainees": rt.json() if rt.status_code == 200 else []}
 
 
 @api.patch("/admin/trainees/{trainee_id}/batch")
 async def assign_batch(trainee_id: str, body: AssignBatchIn, _=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=20) as cx:
-        r = await cx.patch(
-            f"{REST}/trainees?id=eq.{trainee_id}",
-            headers={**ADMIN_HEADERS, "Prefer": "return=representation"},
-            json={"batch_id": body.batch_id},
-        )
+        r = await cx.patch(f"{REST}/trainees?id=eq.{trainee_id}", headers={**ADMIN_HEADERS, "Prefer": "return=representation"}, json={"batch_id": body.batch_id})
     if r.status_code not in (200, 204):
         raise HTTPException(status_code=400, detail=r.text)
     return r.json()[0] if r.json() else {"ok": True}
@@ -614,11 +575,7 @@ async def list_resources(_=Depends(require_admin)):
 @api.post("/admin/resources/categories")
 async def create_resource_category(body: ResourceCategoryIn, _=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=20) as cx:
-        r = await cx.post(
-            f"{REST}/resource_categories",
-            headers={**ADMIN_HEADERS, "Prefer": "return=representation"},
-            json={"name": body.name},
-        )
+        r = await cx.post(f"{REST}/resource_categories", headers={**ADMIN_HEADERS, "Prefer": "return=representation"}, json={"name": body.name})
     if r.status_code not in (200, 201):
         raise HTTPException(status_code=400, detail=r.text)
     return r.json()[0]
@@ -627,11 +584,7 @@ async def create_resource_category(body: ResourceCategoryIn, _=Depends(require_a
 @api.put("/admin/resources/categories/{category_id}")
 async def update_resource_category(category_id: str, body: ResourceCategoryUpdate, _=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=20) as cx:
-        r = await cx.patch(
-            f"{REST}/resource_categories?id=eq.{category_id}",
-            headers={**ADMIN_HEADERS, "Prefer": "return=representation"},
-            json={"name": body.name},
-        )
+        r = await cx.patch(f"{REST}/resource_categories?id=eq.{category_id}", headers={**ADMIN_HEADERS, "Prefer": "return=representation"}, json={"name": body.name})
     if r.status_code not in (200, 204):
         raise HTTPException(status_code=400, detail=r.text)
     return r.json()[0] if r.json() else {"ok": True}
@@ -648,7 +601,7 @@ async def delete_resource_category(category_id: str, _=Depends(require_admin)):
 @api.post("/admin/resources/links")
 async def create_resource_link(body: ResourceLinkIn, _=Depends(require_admin)):
     urls = body.urls if body.urls else ([body.url] if body.url else [])
-    primary_url = urls[0] if urls else ""
+    primary_url = urls[0].get("url", urls[0]) if urls and isinstance(urls[0], dict) else (urls[0] if urls else "")
     async with httpx.AsyncClient(timeout=20) as cx:
         r = await cx.post(
             f"{REST}/resource_links",
@@ -658,6 +611,7 @@ async def create_resource_link(body: ResourceLinkIn, _=Depends(require_admin)):
                 "title": body.title,
                 "url": primary_url,
                 "urls": urls,
+                "practice_sheet_url": body.practice_sheet_url or "",
                 "description": body.description or "",
             },
         )
@@ -673,19 +627,18 @@ async def update_resource_link(link_id: str, body: ResourceLinkUpdate, _=Depends
         patch["title"] = body.title
     if body.description is not None:
         patch["description"] = body.description
+    if body.practice_sheet_url is not None:
+        patch["practice_sheet_url"] = body.practice_sheet_url
     if body.urls is not None:
         patch["urls"] = body.urls
-        patch["url"] = body.urls[0] if body.urls else ""
+        first = body.urls[0] if body.urls else {}
+        patch["url"] = first.get("url", first) if isinstance(first, dict) else first
     elif body.url is not None:
         patch["url"] = body.url
     if not patch:
         raise HTTPException(status_code=400, detail="No fields to update")
     async with httpx.AsyncClient(timeout=20) as cx:
-        r = await cx.patch(
-            f"{REST}/resource_links?id=eq.{link_id}",
-            headers={**ADMIN_HEADERS, "Prefer": "return=representation"},
-            json=patch,
-        )
+        r = await cx.patch(f"{REST}/resource_links?id=eq.{link_id}", headers={**ADMIN_HEADERS, "Prefer": "return=representation"}, json=patch)
     if r.status_code not in (200, 204):
         raise HTTPException(status_code=400, detail=r.text)
     return r.json()[0] if r.json() else {"ok": True}
@@ -731,10 +684,7 @@ async def upsert_progress(body: ProgressIn, ctx=Depends(require_user)):
             raise HTTPException(status_code=404, detail="Trainee not found")
         trainee_id = rows[0]["id"]
 
-        r = await cx.get(
-            f"{REST}/lesson_progress?trainee_id=eq.{trainee_id}&lesson_id=eq.{body.lesson_id}&select=*",
-            headers=ADMIN_HEADERS,
-        )
+        r = await cx.get(f"{REST}/lesson_progress?trainee_id=eq.{trainee_id}&lesson_id=eq.{body.lesson_id}&select=*", headers=ADMIN_HEADERS)
         existing = r.json()[0] if r.status_code == 200 and r.json() else None
 
         watched = existing["watched"] if existing else False
@@ -754,17 +704,9 @@ async def upsert_progress(body: ProgressIn, ctx=Depends(require_user)):
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         if existing:
-            r2 = await cx.patch(
-                f"{REST}/lesson_progress?id=eq.{existing['id']}",
-                headers={**ADMIN_HEADERS, "Prefer": "return=representation"},
-                json=payload,
-            )
+            r2 = await cx.patch(f"{REST}/lesson_progress?id=eq.{existing['id']}", headers={**ADMIN_HEADERS, "Prefer": "return=representation"}, json=payload)
         else:
-            r2 = await cx.post(
-                f"{REST}/lesson_progress",
-                headers={**ADMIN_HEADERS, "Prefer": "return=representation"},
-                json=payload,
-            )
+            r2 = await cx.post(f"{REST}/lesson_progress", headers={**ADMIN_HEADERS, "Prefer": "return=representation"}, json=payload)
     if r2.status_code not in (200, 201, 204):
         raise HTTPException(status_code=400, detail=r2.text)
     return r2.json()[0] if r2.json() else payload
