@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, CheckCircle2, Circle, Clock, XCircle } from "lucide-react";
 import { toast } from "sonner";
+import Papa from "papaparse";
 
 const navItems = [
   { to: "/admin", label: "Dashboard", testId: "nav-dashboard" },
@@ -27,13 +28,44 @@ const scoreColor = (ratio) => {
   return "#dc2626";
 };
 
+const SKIP_COLS = ["Added Time", "IP Address", "Name", "Overall Score", "Link"];
+
+const ASSIGNMENTS = [
+  {
+    name: "SIS",
+    csvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRdhlvmjnqv5YBTpK4oxX914j6HApyK26brmNyqqkIoKGDLJUPyigKBLOlgB4msgfEacRqTuDZtsU3C/pub?output=csv",
+  },
+  {
+    name: "Fee Module",
+    csvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vShKF5uOw7P4V-fuKcGVWCkqBlHHhmFAjH_U5v-rBzONjN9bq813_yQnAbsyOQBlfT6hIDDYxi_YJxz/pub?gid=0&single=true&output=csv",
+  },
+];
+
+const fetchAssignmentResult = async (csvUrl, traineeName) => {
+  try {
+    const res = await fetch(csvUrl, { cache: "no-store" });
+    if (!res.ok) return null;
+    const text = await res.text();
+    const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+    const row = parsed.data.find(
+      (r) => (r["Name"] || "").trim().toLowerCase() === traineeName.trim().toLowerCase()
+    );
+    if (!row) return null;
+    const questions = parsed.meta.fields.filter((f) => !SKIP_COLS.includes(f));
+    return { row, questions };
+  } catch {
+    return null;
+  }
+};
+
 export default function TraineeDetail() {
   const { id } = useParams();
   const [trainee, setTrainee] = useState(null);
   const [progress, setProgress] = useState([]);
-  const [assignments, setAssignments] = useState([]);
   const [modules, setModules] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [assignmentResults, setAssignmentResults] = useState({});
+  const [assignmentsLoading, setAssignmentsLoading] = useState(true);
   const [expandedAssignment, setExpandedAssignment] = useState(null);
 
   useEffect(() => {
@@ -45,12 +77,23 @@ export default function TraineeDetail() {
         ]);
         setTrainee(tRes.trainee || null);
         setProgress(tRes.progress || []);
-        setAssignments(tRes.assignments || []);
         setModules(mods || []);
+
+        // Fetch all assignment CSVs in parallel
+        if (tRes.trainee?.name) {
+          const name = tRes.trainee.name;
+          const results = await Promise.all(
+            ASSIGNMENTS.map((a) => fetchAssignmentResult(a.csvUrl, name))
+          );
+          const map = {};
+          ASSIGNMENTS.forEach((a, i) => { map[a.name] = results[i]; });
+          setAssignmentResults(map);
+        }
       } catch (e) {
         toast.error("Failed to load trainee");
       } finally {
         setLoading(false);
+        setAssignmentsLoading(false);
       }
     })();
   }, [id]);
@@ -161,56 +204,80 @@ export default function TraineeDetail() {
             </div>
           </Card>
 
-          {/* All Assignments */}
-          {assignments.length > 0 ? (
-            assignments.map((a) => {
-              const total = a.total_marks || 15;
-              const ratio = a.score !== null && a.score !== undefined ? a.score / total : null;
-              const color = ratio !== null ? scoreColor(ratio) : "#94a3b8";
-              const isExpanded = expandedAssignment === a.id;
-              return (
-                <Card key={a.id} className="rounded-2xl border-neutral-200/80 p-7">
-                  <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">
-                    {a.assignment_name}
-                  </p>
-                  {a.score !== null && a.score !== undefined ? (
-                    <>
-                      <p className="text-4xl font-semibold mt-2 tabular-nums">
-                        {a.score}
-                        <span className="text-neutral-300 text-2xl">/{total}</span>
-                      </p>
-                      <div className="h-2 bg-neutral-100 rounded-full overflow-hidden mt-4">
-                        <div
-                          className="h-full rounded-full"
-                          style={{ width: `${(a.score / total) * 100}%`, backgroundColor: color }}
-                        />
-                      </div>
-                      <p className="text-sm mt-3 font-medium" style={{ color }}>
-                        {a.passed ? "✓ Pass" : "✗ Needs Improvement"}
-                      </p>
-                      {a.recording_url && (
-                        <a
-                          href={a.recording_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-blue-600 hover:underline mt-2 inline-block"
-                        >
-                          View submission →
-                        </a>
-                      )}
-                    </>
-                  ) : (
-                    <p className="text-sm text-neutral-400 mt-2">Not attempted yet</p>
-                  )}
-                </Card>
-              );
-            })
-          ) : (
-            <Card className="rounded-2xl border-neutral-200/80 p-7">
-              <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Assignments</p>
-              <p className="text-sm text-neutral-400 mt-2">No assignments yet</p>
-            </Card>
-          )}
+          {/* Assignment Cards — one per assignment */}
+          {ASSIGNMENTS.map((a) => {
+            const result = assignmentResults[a.name];
+            const score = result ? parseFloat(result.row["Overall Score"] || 0) : null;
+            const total = result ? result.questions.length : 15;
+            const ratio = score !== null ? score / total : null;
+            const color = ratio !== null ? scoreColor(ratio) : "#94a3b8";
+            const link = result ? result.row["Link"] : null;
+            const isExpanded = expandedAssignment === a.name;
+
+            return (
+              <Card key={a.name} className="rounded-2xl border-neutral-200/80 p-7">
+                <p className="text-xs uppercase tracking-[0.18em] text-neutral-500">{a.name}</p>
+                {assignmentsLoading ? (
+                  <p className="text-sm text-neutral-400 mt-2">Loading...</p>
+                ) : score !== null ? (
+                  <>
+                    <p className="text-4xl font-semibold mt-2 tabular-nums">
+                      {score}
+                      <span className="text-neutral-300 text-2xl">/{total}</span>
+                    </p>
+                    <div className="h-2 bg-neutral-100 rounded-full overflow-hidden mt-4">
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: `${(score / total) * 100}%`, backgroundColor: color }}
+                      />
+                    </div>
+                    <p className="text-sm mt-3 font-medium" style={{ color }}>
+                      {ratio >= 0.7 ? "✓ Pass" : "✗ Needs Improvement"}
+                    </p>
+                    {link && (
+                      <a
+                        href={link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-blue-600 hover:underline mt-2 inline-block"
+                      >
+                        View submission →
+                      </a>
+                    )}
+                    <button
+                      onClick={() => setExpandedAssignment(isExpanded ? null : a.name)}
+                      className="mt-4 text-xs text-neutral-500 hover:text-neutral-800 flex items-center gap-1 w-full"
+                    >
+                      {isExpanded ? "▲ Hide breakdown" : "▼ Show breakdown"}
+                    </button>
+                    {isExpanded && (
+                      <ul className="mt-3 divide-y divide-neutral-100 border border-neutral-100 rounded-xl overflow-hidden">
+                        {result.questions.map((q, i) => {
+                          const ans = (result.row[q] || "").trim().toLowerCase();
+                          const correct = ans === "yes";
+                          return (
+                            <li key={i} className="px-3 py-2 flex items-start gap-2 text-xs">
+                              {correct ? (
+                                <CheckCircle2 className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" style={{ color: "#16a34a" }} />
+                              ) : (
+                                <XCircle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5 text-red-500" />
+                              )}
+                              <p className="flex-1 text-neutral-700">{q}</p>
+                              <span className={`font-medium ${correct ? "text-green-600" : "text-red-500"}`}>
+                                {correct ? "Yes" : "No"}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm text-neutral-400 mt-2">Not attempted yet</p>
+                )}
+              </Card>
+            );
+          })}
         </div>
       </div>
 
