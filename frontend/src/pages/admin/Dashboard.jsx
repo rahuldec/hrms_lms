@@ -5,8 +5,10 @@ import { fetchAllAssignmentResults } from "@/lib/assignments";
 import AppShell from "@/components/AppShell";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Users, TrendingUp, CheckCircle2, PauseCircle, ChevronDown, ChevronUp, X } from "lucide-react";
+import { Users, TrendingUp, CheckCircle2, PauseCircle, ChevronDown, ChevronUp, X, Clock, Activity } from "lucide-react";
 import { toast } from "sonner";
+
+const API_BASE = import.meta.env.VITE_API_URL || "https://odted-emergent.onrender.com/api";
 
 const Stat = ({ icon: Icon, label, value, testId }) => (
   <Card data-testid={testId} className="rounded-2xl border-neutral-200/80 p-6 hover:shadow-sm transition-shadow">
@@ -35,6 +37,29 @@ const fmtDate = (iso) => {
   if (!iso) return "";
   const d = new Date(iso);
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+};
+
+const fmtDateTime = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+};
+
+const timeAgo = (iso) => {
+  if (!iso) return null;
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (diff < 60) return "just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+  return fmtDate(iso);
 };
 
 const daysSince = (iso) => {
@@ -117,14 +142,122 @@ function AssignmentModal({ assignment, onClose }) {
   );
 }
 
+function TimelineModal({ trainee, token, onClose }) {
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!trainee) return;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/admin/trainees/${trainee.id}/timeline`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        setEvents(Array.isArray(data) ? data : []);
+      } catch {
+        setEvents([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [trainee, token]);
+
+  if (!trainee) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-neutral-900/70 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-6 py-4 flex items-center justify-between border-b border-neutral-100">
+          <div>
+            <p className="text-xs text-neutral-500 uppercase tracking-wider mb-0.5">Login Timeline</p>
+            <p className="font-semibold text-lg">{trainee.name}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="h-8 w-8 rounded-full hover:bg-neutral-100 grid place-items-center"
+          >
+            <X className="h-4 w-4 text-neutral-500" />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto max-h-[70vh] px-6 py-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-10">
+              <div className="h-5 w-5 border-2 border-orange-400 border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : events.length === 0 ? (
+            <div className="text-center py-10">
+              <Activity className="h-8 w-8 text-neutral-300 mx-auto mb-2" />
+              <p className="text-sm text-neutral-400">No login activity yet</p>
+            </div>
+          ) : (
+            <div className="relative">
+              <div className="absolute left-3 top-0 bottom-0 w-px bg-neutral-100" />
+              <div className="space-y-4">
+                {events.map((ev, i) => (
+                  <div key={ev.id} className="flex items-start gap-4 relative">
+                    <div
+                      className="h-6 w-6 rounded-full grid place-items-center flex-shrink-0 z-10 ring-2 ring-white"
+                      style={{ backgroundColor: "#FFF0E8" }}
+                    >
+                      <Clock className="h-3 w-3" style={{ color: "#E05A2B" }} />
+                    </div>
+                    <div className="pb-1">
+                      <p className="text-sm font-medium text-neutral-800">Portal visit</p>
+                      <p className="text-xs text-neutral-400">{fmtDateTime(ev.created_at)}</p>
+                      {i === 0 && (
+                        <span className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200 mt-1">
+                          Most recent
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-3 border-t border-neutral-100 bg-neutral-50">
+          <p className="text-xs text-neutral-400">Showing last {events.length} visit{events.length !== 1 ? "s" : ""} (max 50)</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminDashboard() {
   const [trainees, setTrainees] = useState([]);
   const [assignmentResults, setAssignmentResults] = useState({});
+  const [lastSeen, setLastSeen] = useState({});
   const [loading, setLoading] = useState(true);
   const [expandedLevel, setExpandedLevel] = useState(null);
   const [activeAssignment, setActiveAssignment] = useState(null);
+  const [timelineTrainee, setTimelineTrainee] = useState(null);
+  const [token, setToken] = useState(null);
 
   useEffect(() => {
+    // Get token from localStorage (standard Supabase key)
+    const stored = localStorage.getItem("sb-rlenfsigkfxppxkskqks-auth-token");
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        setToken(parsed?.access_token || null);
+      } catch {
+        setToken(null);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!token) return;
     (async () => {
       try {
         const [data, aResults] = await Promise.all([
@@ -133,13 +266,22 @@ export default function AdminDashboard() {
         ]);
         setTrainees(Array.isArray(data) ? data : []);
         setAssignmentResults(aResults || {});
+
+        // Fetch last-seen for all trainees
+        const lsRes = await fetch(`${API_BASE}/admin/trainees/last-seen/all`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (lsRes.ok) {
+          const lsData = await lsRes.json();
+          setLastSeen(lsData || {});
+        }
       } catch (e) {
         toast.error("Could not load trainees");
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [token]);
 
   const total = trainees.length;
   const active = trainees.filter((t) => t.status === "Active").length;
@@ -242,6 +384,22 @@ export default function AdminDashboard() {
                       const promotions = history.filter((h) => h.type === "promotion");
                       const assignments = getAssignments(t.name);
                       const days = daysSince(t.join_date);
+                      const lastSeenAt = lastSeen[t.id] || null;
+                      const lastSeenLabel = lastSeenAt ? timeAgo(lastSeenAt) : null;
+
+                      // Determine last-seen badge color
+                      let lastSeenColor = { bg: "#f3f4f6", text: "#6b7280", ring: "#d1d5db" };
+                      if (lastSeenAt) {
+                        const diffHours = (Date.now() - new Date(lastSeenAt).getTime()) / 3600000;
+                        if (diffHours < 24) {
+                          lastSeenColor = { bg: "#f0fdf4", text: "#16a34a", ring: "#bbf7d0" };
+                        } else if (diffHours < 72) {
+                          lastSeenColor = { bg: "#fefce8", text: "#ca8a04", ring: "#fef08a" };
+                        } else {
+                          lastSeenColor = { bg: "#fef2f2", text: "#dc2626", ring: "#fecaca" };
+                        }
+                      }
+
                       return (
                         <div key={t.id} className="px-5 py-4">
                           <div className="flex items-center justify-between">
@@ -253,7 +411,7 @@ export default function AdminDashboard() {
                                 {t.name?.charAt(0).toUpperCase()}
                               </div>
                               <div>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <Link
                                     to={`/admin/trainees/${t.id}`}
                                     className="text-sm font-medium text-neutral-900 hover:underline"
@@ -265,6 +423,22 @@ export default function AdminDashboard() {
                                       Day {days}
                                     </span>
                                   )}
+                                  {/* Last seen badge — clickable to open timeline */}
+                                  <button
+                                    onClick={() => setTimelineTrainee(t)}
+                                    title="View login timeline"
+                                    className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ring-1 transition-opacity hover:opacity-70"
+                                    style={{
+                                      backgroundColor: lastSeenColor.bg,
+                                      color: lastSeenColor.text,
+                                      ringColor: lastSeenColor.ring,
+                                      borderColor: lastSeenColor.ring,
+                                      border: `1px solid ${lastSeenColor.ring}`,
+                                    }}
+                                  >
+                                    <Clock className="h-3 w-3" />
+                                    {lastSeenLabel ? `Last seen ${lastSeenLabel}` : "Never logged in"}
+                                  </button>
                                 </div>
                                 <p className="text-xs text-neutral-500">
                                   @{t.username}
@@ -359,6 +533,7 @@ export default function AdminDashboard() {
       </Card>
 
       <AssignmentModal assignment={activeAssignment} onClose={() => setActiveAssignment(null)} />
+      <TimelineModal trainee={timelineTrainee} token={token} onClose={() => setTimelineTrainee(null)} />
     </AppShell>
   );
 }
