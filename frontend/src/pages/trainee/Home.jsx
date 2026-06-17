@@ -267,39 +267,54 @@ export default function TraineeHome() {
                   {mod.lessons.map((l) => {
                     const p = progress[l.id];
                     const watched = !!p?.watched;
+                    const isVideo = l.kind === "video";
+                    const isAssignment = l.kind === "assignment";
+
+                    const accentColor = isVideo ? "#1D9E75" : isAssignment ? "#BA7517" : "#a3a3a3";
+                    const iconBg = isVideo ? "#E1F5EE" : isAssignment ? "#FAEEDA" : "#f5f5f5";
+                    const iconColor = isVideo ? "#085041" : isAssignment ? "#633806" : "#a3a3a3";
+                    const chipBg = isVideo ? "#E1F5EE" : isAssignment ? "#FAEEDA" : "#f5f5f5";
+                    const chipColor = isVideo ? "#085041" : isAssignment ? "#633806" : "#a3a3a3";
+                    const chipLabel = isVideo ? "Video" : isAssignment ? "Assignment" : "Review";
+
                     return (
                       <li
                         key={l.id}
                         data-testid={`lesson-${l.id}`}
-                        className="px-5 py-4 flex items-center gap-4 hover:bg-neutral-50/60 cursor-pointer transition-colors"
+                        className="px-5 py-4 flex items-center gap-3.5 hover:bg-neutral-50/60 cursor-pointer transition-colors"
+                        style={{ borderLeft: `3px solid ${accentColor}` }}
                         onClick={() => openLesson(l)}
                       >
-                        {l.kind === "video" ? (
-                          watched ? (
-                            <CheckCircle2 className="h-5 w-5 flex-shrink-0" style={{ color: "#E05A2B" }} />
+                        <div
+                          className="h-8 w-8 rounded-full grid place-items-center flex-shrink-0"
+                          style={{ backgroundColor: isVideo && watched ? accentColor : iconBg }}
+                        >
+                          {isVideo ? (
+                            watched ? (
+                              <CheckCircle2 className="h-4 w-4" style={{ color: "white" }} />
+                            ) : (
+                              <Play className="h-4 w-4" style={{ color: iconColor }} />
+                            )
+                          ) : isAssignment ? (
+                            <FileText className="h-4 w-4" style={{ color: iconColor }} />
                           ) : (
-                            <Circle className="h-5 w-5 text-neutral-300 flex-shrink-0" />
-                          )
-                        ) : l.kind === "assignment" ? (
-                          <FileText className="h-5 w-5 text-amber-600 flex-shrink-0" />
-                        ) : (
-                          <Circle className="h-5 w-5 text-neutral-200 flex-shrink-0" />
-                        )}
+                            <Circle className="h-4 w-4" style={{ color: iconColor }} />
+                          )}
+                        </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-neutral-900 truncate">{l.title}</p>
                           <p className="text-xs text-neutral-500 mt-0.5">
                             {l.day}
-                            {l.kind === "assignment" && " · Assignment PDF"}
-                            {l.kind === "review" && " · Review"}
+                            {watched ? " · Watched" : ""}
                           </p>
                         </div>
-                        {l.kind === "video" && l.videoEmbedUrl && (
-                          <Play className="h-4 w-4 text-neutral-400" />
-                        )}
-                        {l.kind === "assignment" && l.assignmentUrl && (
-                          <FileText className="h-4 w-4 text-neutral-400" />
-                        )}
-                        <ChevronRight className="h-4 w-4 text-neutral-300" />
+                        <span
+                          className="text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: chipBg, color: chipColor }}
+                        >
+                          {chipLabel}
+                        </span>
+                        <ChevronRight className="h-4 w-4 text-neutral-300 flex-shrink-0" />
                       </li>
                     );
                   })}
