@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { fetchAllAssignmentResults } from "@/lib/assignments";
@@ -119,6 +119,8 @@ function AssignmentModal({ assignment, onClose }) {
 
 export default function AdminDashboard() {
   const [trainees, setTrainees] = useState([]);
+  const [batches, setBatches] = useState([]);
+  const [selectedBatch, setSelectedBatch] = useState("all");
   const [assignmentResults, setAssignmentResults] = useState({});
   const [loading, setLoading] = useState(true);
   const [expandedLevel, setExpandedLevel] = useState(null);
@@ -127,12 +129,14 @@ export default function AdminDashboard() {
   useEffect(() => {
     (async () => {
       try {
-        const [data, aResults] = await Promise.all([
+        const [data, aResults, batchData] = await Promise.all([
           api.listTrainees(),
           fetchAllAssignmentResults().catch(() => ({})),
+          api.listBatches().catch(() => []),
         ]);
         setTrainees(Array.isArray(data) ? data : []);
         setAssignmentResults(aResults || {});
+        setBatches(Array.isArray(batchData) ? batchData : []);
       } catch (e) {
         toast.error("Could not load trainees");
       } finally {
@@ -141,17 +145,29 @@ export default function AdminDashboard() {
     })();
   }, []);
 
-  const total = trainees.length;
-  const active = trainees.filter((t) => t.status === "Active").length;
-  const onHold = trainees.filter((t) => t.status === "On Hold").length;
+  const batchNameById = useMemo(() => {
+    const map = {};
+    batches.forEach((b) => (map[b.id] = b.name));
+    return map;
+  }, [batches]);
+
+  const filteredTrainees = useMemo(() => {
+    if (selectedBatch === "all") return trainees;
+    if (selectedBatch === "none") return trainees.filter((t) => !t.batch_id);
+    return trainees.filter((t) => t.batch_id === selectedBatch);
+  }, [trainees, selectedBatch]);
+
+  const total = filteredTrainees.length;
+  const active = filteredTrainees.filter((t) => t.status === "Active").length;
+  const onHold = filteredTrainees.filter((t) => t.status === "On Hold").length;
 
   const levelGroups = [0, 1, 2, 3].map((lvl) => ({
     level: lvl,
-    trainees: trainees.filter((t) => (t.current_level ?? 0) === lvl),
+    trainees: filteredTrainees.filter((t) => (t.current_level ?? 0) === lvl),
   }));
 
   const now = new Date();
-  const promotionsThisMonth = trainees.reduce((acc, t) => {
+  const promotionsThisMonth = filteredTrainees.reduce((acc, t) => {
     const history = Array.isArray(t.history) ? t.history : [];
     const inMonth = history.some((h) => {
       if (!h?.at) return false;
@@ -185,6 +201,23 @@ export default function AdminDashboard() {
         <Stat testId="stat-active" icon={CheckCircle2} label="Active" value={loading ? "-" : active} />
         <Stat testId="stat-onhold" icon={PauseCircle} label="On hold" value={loading ? "-" : onHold} />
         <Stat testId="stat-promotions" icon={TrendingUp} label="Promotions this month" value={loading ? "-" : promotionsThisMonth} />
+      </div>
+
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-sm text-neutral-500">Filter by batch</p>
+        <select
+          value={selectedBatch}
+          onChange={(e) => setSelectedBatch(e.target.value)}
+          className="text-sm border border-neutral-200 rounded-full px-4 py-1.5 bg-white text-neutral-700 focus:outline-none focus:ring-2 focus:ring-orange-200"
+        >
+          <option value="all">All batches</option>
+          {batches.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+          <option value="none">No batch assigned</option>
+        </select>
       </div>
 
       <Card className="rounded-2xl border-neutral-200/80 p-7">
@@ -288,6 +321,11 @@ export default function AdminDashboard() {
                               >
                                 L{t.current_level ?? 0}
                               </span>
+                              {t.batch_id && batchNameById[t.batch_id] && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-50 text-blue-600 ring-1 ring-blue-200">
+                                  {batchNameById[t.batch_id]}
+                                </span>
+                              )}
                               {latestPromotion && (
                                 <span className="inline-flex items-center gap-0.5 text-[10px] text-neutral-400 ml-auto">
                                   <TrendingUp className="h-2.5 w-2.5" />
