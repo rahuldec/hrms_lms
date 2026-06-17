@@ -236,46 +236,45 @@ export default function AdminDashboard() {
                 </button>
 
                 {isExpanded && lvlTrainees.length > 0 && (
-                  <div className="border-t border-neutral-100 divide-y divide-neutral-50">
-                    {lvlTrainees.map((t) => {
-                      const history = Array.isArray(t.history) ? t.history : [];
-                      const promotions = history.filter((h) => h.type === "promotion");
-                      const assignments = getAssignments(t.name);
-                      const days = daysSince(t.join_date);
-                      return (
-                        <div key={t.id} className="px-5 py-4">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div
-                                className="h-8 w-8 rounded-full grid place-items-center text-white text-xs font-semibold flex-shrink-0"
-                                style={{ backgroundColor: "#E05A2B" }}
-                              >
-                                {t.name?.charAt(0).toUpperCase()}
-                              </div>
-                              <div>
-                                <div className="flex items-center gap-2">
+                  <div className="border-t border-neutral-100 p-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {lvlTrainees.map((t) => {
+                        const history = Array.isArray(t.history) ? t.history : [];
+                        const promotions = history.filter((h) => h.type === "promotion");
+                        const assignments = getAssignments(t.name);
+                        const days = daysSince(t.join_date);
+                        const latestPromotion = promotions[promotions.length - 1];
+                        return (
+                          <div
+                            key={t.id}
+                            className="border border-neutral-200 rounded-xl p-3.5 hover:shadow-sm hover:border-neutral-300 transition-all bg-white"
+                          >
+                            <div className="flex items-start justify-between mb-2.5">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div
+                                  className="h-8 w-8 rounded-full grid place-items-center text-white text-xs font-semibold flex-shrink-0"
+                                  style={{ backgroundColor: "#E05A2B" }}
+                                >
+                                  {t.name?.charAt(0).toUpperCase()}
+                                </div>
+                                <div className="min-w-0">
                                   <Link
                                     to={`/admin/trainees/${t.id}`}
-                                    className="text-sm font-medium text-neutral-900 hover:underline"
+                                    className="text-sm font-medium text-neutral-900 hover:underline truncate block"
                                   >
                                     {t.name}
                                   </Link>
-                                  {days !== null && (
-                                    <span className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-orange-50 text-orange-600 ring-1 ring-orange-200">
-                                      Day {days}
-                                    </span>
-                                  )}
+                                  <p className="text-xs text-neutral-400 truncate">
+                                    @{t.username}
+                                    {days !== null ? ` · Day ${days}` : ""}
+                                  </p>
                                 </div>
-                                <p className="text-xs text-neutral-500">
-                                  @{t.username}
-                                  {t.manager ? ` - ${t.manager}` : ""}
-                                  {t.join_date ? ` - Joined ${fmtDate(t.join_date)}` : ""}
-                                </p>
                               </div>
                             </div>
-                            <div className="flex items-center gap-2">
+
+                            <div className="flex items-center gap-1.5 mb-3">
                               <span
-                                className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs ring-1 ${
+                                className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ring-1 ${
                                   t.status === "Active"
                                     ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
                                     : "bg-neutral-100 text-neutral-600 ring-neutral-200"
@@ -283,67 +282,54 @@ export default function AdminDashboard() {
                               >
                                 {t.status}
                               </span>
-                              <Badge
-                                className="rounded-full text-xs"
+                              <span
+                                className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium"
                                 style={{ backgroundColor: "#FFF0E8", color: "#E05A2B" }}
                               >
                                 L{t.current_level ?? 0}
-                              </Badge>
+                              </span>
+                              {latestPromotion && (
+                                <span className="inline-flex items-center gap-0.5 text-[10px] text-neutral-400 ml-auto">
+                                  <TrendingUp className="h-2.5 w-2.5" />
+                                  {fmtDate(latestPromotion.at)}
+                                </span>
+                              )}
                             </div>
-                          </div>
 
-                          <div className="mt-3 ml-11">
                             {assignments.length > 0 ? (
-                              <div className="flex flex-wrap gap-2 mb-3">
+                              <div className="flex flex-col gap-1.5">
                                 {assignments.map((a) => {
                                   const color = a.passed ? "#16a34a" : "#dc2626";
+                                  const pct = a.total ? Math.min(100, Math.round((a.score / a.total) * 100)) : 0;
                                   return (
                                     <button
                                       key={a.id}
                                       onClick={() => setActiveAssignment(a)}
-                                      className="inline-flex items-center gap-1.5 text-xs border rounded-full px-2.5 py-1 cursor-pointer hover:opacity-80 transition-opacity"
-                                      style={{ borderColor: color + "40", backgroundColor: color + "10" }}
+                                      className="text-left hover:opacity-80 transition-opacity"
                                     >
-                                      <span className="font-medium text-neutral-700">{a.name}:</span>
-                                      <span className="font-semibold" style={{ color: color }}>
-                                        {a.score}/{a.total}
-                                      </span>
-                                      <span style={{ color: color }}>
-                                        {a.passed ? "Pass" : "Fail"}
-                                      </span>
+                                      <div className="flex items-center justify-between mb-0.5">
+                                        <span className="text-[11px] text-neutral-500">{a.name}</span>
+                                        <span className="text-[11px] font-medium" style={{ color }}>
+                                          {a.score}/{a.total} {a.passed ? "Pass" : "Fail"}
+                                        </span>
+                                      </div>
+                                      <div className="h-1 bg-neutral-100 rounded-full overflow-hidden">
+                                        <div
+                                          className="h-full rounded-full"
+                                          style={{ width: `${pct}%`, backgroundColor: color }}
+                                        />
+                                      </div>
                                     </button>
                                   );
                                 })}
                               </div>
                             ) : (
-                              <p className="text-xs text-neutral-400 mb-2">No assignments attempted</p>
-                            )}
-
-                            {promotions.length > 0 ? (
-                              <div>
-                                <p className="text-xs text-neutral-400 uppercase tracking-wider mb-1.5">
-                                  Promotion history
-                                </p>
-                                <div className="flex flex-wrap gap-2">
-                                  {promotions.map((h, i) => (
-                                    <span
-                                      key={i}
-                                      className="inline-flex items-center gap-1 text-xs bg-neutral-50 border border-neutral-200 rounded-full px-2.5 py-1"
-                                    >
-                                      <TrendingUp className="h-3 w-3 text-orange-500" />
-                                      L{h.from} to L{h.to}
-                                      <span className="text-neutral-400">- {fmtDate(h.at)}</span>
-                                    </span>
-                                  ))}
-                                </div>
-                              </div>
-                            ) : (
-                              <p className="text-xs text-neutral-400">No promotions yet</p>
+                              <p className="text-[11px] text-neutral-400">No assignments yet</p>
                             )}
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
 
