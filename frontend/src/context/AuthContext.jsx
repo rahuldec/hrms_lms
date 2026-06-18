@@ -32,6 +32,21 @@ export const AuthProvider = ({ children }) => {
     } catch (e) {
       setRole(null);
       setTrainee(null);
+      // A 401 here means the backend has rejected this token outright (expired,
+      // revoked, or otherwise invalid) and a plain retry won't help - the safest
+      // move is a clean sign-out so the user lands on the login screen instead of
+      // a half-loaded dashboard showing zeros everywhere.
+      if (e?.response?.status === 401) {
+        try {
+          await supabase.auth.signOut({ scope: "global" });
+        } catch (signOutErr) {
+          await supabase.auth.signOut();
+        }
+        try {
+          localStorage.removeItem("odk-training-auth");
+        } catch (storageErr) {}
+        setSession(null);
+      }
     }
   }, []);
 
