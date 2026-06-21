@@ -12,7 +12,7 @@ import Batches from "@/pages/admin/Batches";
 import BatchDetail from "@/pages/admin/BatchDetail";
 import Resources from "@/pages/admin/Resources";
 import TraineeHome from "@/pages/trainee/Home";
-import PublicLearn from "@/pages/public/Learn";
+import PublicLearn from "@/pages/Learn";
 function RootRedirect() {
   const { session, role, loading } = useAuth();
   if (loading) return null;
