@@ -137,6 +137,31 @@ export const api = {
         )
         .then((r) => r.data)
     ),
+
+  // Batch <-> Module assignment
+  getBatchModules: (batchId) =>
+    withAuthRetry((headers) =>
+      axios
+        .get(`${BASE}/admin/batches/${batchId}/modules`, { headers })
+        .then((r) => r.data)
+    ),
+  setBatchModules: (batchId, moduleNames) =>
+    withAuthRetry((headers) =>
+      axios
+        .post(
+          `${BASE}/admin/batches/${batchId}/modules`,
+          { module_names: moduleNames },
+          { headers }
+        )
+        .then((r) => r.data)
+    ),
+  getBatchAnalytics: (batchId) =>
+    withAuthRetry((headers) =>
+      axios
+        .get(`${BASE}/admin/batches/${batchId}/analytics`, { headers })
+        .then((r) => r.data)
+    ),
+
   myProgress: () =>
     withAuthRetry((headers) =>
       axios.get(`${BASE}/trainee/progress`, { headers }).then((r) => r.data)
