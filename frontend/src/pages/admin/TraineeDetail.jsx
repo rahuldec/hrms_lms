@@ -39,6 +39,10 @@ const ASSIGNMENTS = [
     name: "Fee Module",
     csvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vShKF5uOw7P4V-fuKcGVWCkqBlHHhmFAjH_U5v-rBzONjN9bq813_yQnAbsyOQBlfT6hIDDYxi_YJxz/pub?gid=0&single=true&output=csv",
   },
+  {
+    name: "Academic Module",
+    csvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vTiB9myHbpIiCVCK2Yikqy6VeQ_Lr6mt1XCdvQIxMdGQemIYpTp5UehEKN1GDiYQwRuBFB6tbuxGyzh/pub?gid=0&single=true&output=csv",
+  },
 ];
 
 const fetchAssignmentResult = async (csvUrl, traineeName) => {
