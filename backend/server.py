@@ -45,14 +45,35 @@ api = APIRouter(prefix="/api")
 
 # ---------- helpers ----------
 async def supabase_get_user(token: str) -> Dict[str, Any]:
-    async with httpx.AsyncClient(timeout=15) as cx:
-        r = await cx.get(
-            f"{AUTH}/user",
-            headers={"apikey": ANON_KEY, "Authorization": f"Bearer {token}"},
-        )
-    if r.status_code != 200:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return r.json()
+    last_error = None
+    for attempt in range(2):  # one retry to absorb a one-off network/timeout blip
+        try:
+            async with httpx.AsyncClient(timeout=15) as cx:
+                r = await cx.get(
+                    f"{AUTH}/user",
+                    headers={"apikey": ANON_KEY, "Authorization": f"Bearer {token}"},
+                )
+        except (httpx.TimeoutException, httpx.TransportError) as e:
+            # Network/timeout talking to Supabase - NOT a token problem.
+            # Don't tell the frontend "invalid token" (that triggers sign-out).
+            last_error = e
+            continue
+
+        if r.status_code == 401:
+            # Supabase explicitly rejected the token - genuinely invalid/expired.
+            raise HTTPException(status_code=401, detail="Invalid token")
+        if r.status_code != 200:
+            # Some other hiccup on Supabase's side (5xx, rate limit, etc).
+            # Treat as transient, not as an invalid session.
+            last_error = HTTPException(
+                status_code=503, detail="Auth service temporarily unavailable"
+            )
+            continue
+        return r.json()
+
+    if isinstance(last_error, HTTPException):
+        raise last_error
+    raise HTTPException(status_code=503, detail="Auth service temporarily unavailable")
 
 
 async def get_user_role(user_id: str) -> Optional[str]:
