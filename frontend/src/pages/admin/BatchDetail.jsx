@@ -6,7 +6,7 @@ import AppShell from "@/components/AppShell";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, CheckCircle2, Clock, TrendingUp } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Clock, TrendingUp, Layers } from "lucide-react";
 import { toast } from "sonner";
 
 const navItems = [
@@ -39,16 +39,24 @@ export default function BatchDetail() {
   const [loading, setLoading] = useState(true);
   const [promotingId, setPromotingId] = useState(null);
 
+  // Module assignment state
+  const [assignedModules, setAssignedModules] = useState(new Set());
+  const [savingModule, setSavingModule] = useState(null); // module name currently being toggled
+
   useEffect(() => {
     (async () => {
       try {
-        const [bRes, mods] = await Promise.all([
+        const [bRes, mods, batchModulesRes] = await Promise.all([
           api.getBatch(id),
           fetchSheetModules().catch(() => []),
+          api.getBatchModules(id).catch(() => []),
         ]);
         setBatch(bRes.batch || null);
         setTrainees(bRes.trainees || []);
         setModules(mods || []);
+        setAssignedModules(
+          new Set((batchModulesRes || []).map((row) => row.module_name))
+        );
 
         // fetch progress for each trainee
         const pm = {};
@@ -79,6 +87,24 @@ export default function BatchDetail() {
       ),
     [modules]
   );
+
+  const toggleModule = async (moduleName) => {
+    const next = new Set(assignedModules);
+    if (next.has(moduleName)) {
+      next.delete(moduleName);
+    } else {
+      next.add(moduleName);
+    }
+    setSavingModule(moduleName);
+    try {
+      await api.setBatchModules(id, Array.from(next));
+      setAssignedModules(next);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to update module assignment");
+    } finally {
+      setSavingModule(null);
+    }
+  };
 
   const promote = async (t) => {
     const next = (t.current_level ?? 0) + 1;
@@ -170,6 +196,45 @@ export default function BatchDetail() {
           </div>
         </Card>
       </div>
+
+      {/* Module Assignment */}
+      <Card className="rounded-2xl border-neutral-200/80 p-7 mb-8">
+        <div className="flex items-center gap-2 mb-1">
+          <Layers className="h-4 w-4 text-neutral-400" />
+          <h2 className="text-lg font-semibold">Modules assigned to this batch</h2>
+        </div>
+        <p className="text-sm text-neutral-500 mb-5">
+          Only checked modules will be visible to trainees in this batch.
+        </p>
+        {modules.length === 0 ? (
+          <p className="text-sm text-neutral-400">No modules found in the training sheet.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {modules.map((m) => {
+              const checked = assignedModules.has(m.name);
+              const isSaving = savingModule === m.name;
+              return (
+                <label
+                  key={m.name}
+                  className={`flex items-center gap-2.5 px-4 py-3 rounded-xl border cursor-pointer transition-colors ${
+                    checked
+                      ? "border-[#E05A2B]/30 bg-[#FFF0E8]"
+                      : "border-neutral-200 hover:bg-neutral-50"
+                  } ${isSaving ? "opacity-60 pointer-events-none" : ""}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleModule(m.name)}
+                    className="h-4 w-4 rounded border-neutral-300 accent-[#E05A2B]"
+                  />
+                  <span className="text-sm font-medium text-neutral-800">{m.name}</span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+      </Card>
 
       {/* Trainees Table */}
       <Card className="rounded-2xl border-neutral-200/80 overflow-hidden">
