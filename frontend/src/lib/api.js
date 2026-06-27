@@ -107,6 +107,12 @@ export const api = {
         .post(`${BASE}/admin/trainees/${id}/promote`, {}, { headers })
         .then((r) => r.data)
     ),
+  demoteTrainee: (id) =>
+    withAuthRetry((headers) =>
+      axios
+        .post(`${BASE}/admin/trainees/${id}/demote`, {}, { headers })
+        .then((r) => r.data)
+    ),
   listBatches: () =>
     withAuthRetry((headers) =>
       axios.get(`${BASE}/admin/batches`, { headers }).then((r) => r.data)
