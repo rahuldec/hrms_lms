@@ -245,6 +245,26 @@ class ResourceLinkUpdate(BaseModel):
     description: Optional[str] = None
 
 
+class TrainingModuleIn(BaseModel):
+    sr_no: Optional[int] = None
+    module: str
+    day_label: Optional[str] = ""
+    sub_part: str
+    video_url: Optional[str] = ""
+    assignment_url: Optional[str] = ""
+    sort_order: Optional[int] = 0
+
+
+class TrainingModuleUpdate(BaseModel):
+    sr_no: Optional[int] = None
+    module: Optional[str] = None
+    day_label: Optional[str] = None
+    sub_part: Optional[str] = None
+    video_url: Optional[str] = None
+    assignment_url: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
 # ---------- setup / health ----------
 @api.get("/")
 async def root():
@@ -823,6 +843,52 @@ async def update_resource_link(link_id: str, body: ResourceLinkUpdate, _=Depends
 async def delete_resource_link(link_id: str, _=Depends(require_admin)):
     async with httpx.AsyncClient(timeout=20) as cx:
         await cx.delete(f"{REST}/resource_links?id=eq.{link_id}", headers=ADMIN_HEADERS)
+    return {"ok": True}
+
+
+# ---------- admin training modules ----------
+@api.get("/admin/training-modules")
+async def list_training_modules(_=Depends(require_admin)):
+    async with httpx.AsyncClient(timeout=20) as cx:
+        r = await cx.get(f"{REST}/training_modules?select=*&order=sort_order.asc", headers=ADMIN_HEADERS)
+    if r.status_code != 200:
+        raise HTTPException(status_code=400, detail=r.text)
+    return r.json()
+
+
+@api.post("/admin/training-modules")
+async def create_training_module(body: TrainingModuleIn, _=Depends(require_admin)):
+    async with httpx.AsyncClient(timeout=20) as cx:
+        r = await cx.post(
+            f"{REST}/training_modules",
+            headers={**ADMIN_HEADERS, "Prefer": "return=representation"},
+            json=body.dict(),
+        )
+    if r.status_code not in (200, 201):
+        raise HTTPException(status_code=400, detail=r.text)
+    return r.json()[0]
+
+
+@api.put("/admin/training-modules/{module_id}")
+async def update_training_module(module_id: str, body: TrainingModuleUpdate, _=Depends(require_admin)):
+    patch = {k: v for k, v in body.dict().items() if v is not None}
+    if not patch:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    async with httpx.AsyncClient(timeout=20) as cx:
+        r = await cx.patch(
+            f"{REST}/training_modules?id=eq.{module_id}",
+            headers={**ADMIN_HEADERS, "Prefer": "return=representation"},
+            json=patch,
+        )
+    if r.status_code not in (200, 204):
+        raise HTTPException(status_code=400, detail=r.text)
+    return r.json()[0] if r.json() else {"ok": True}
+
+
+@api.delete("/admin/training-modules/{module_id}")
+async def delete_training_module(module_id: str, _=Depends(require_admin)):
+    async with httpx.AsyncClient(timeout=20) as cx:
+        await cx.delete(f"{REST}/training_modules?id=eq.{module_id}", headers=ADMIN_HEADERS)
     return {"ok": True}
 
 
