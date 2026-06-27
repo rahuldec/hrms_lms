@@ -6,7 +6,7 @@ import AppShell from "@/components/AppShell";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, CheckCircle2, Clock, TrendingUp, Layers, Flag } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Clock, TrendingUp, TrendingDown, Layers, Flag } from "lucide-react";
 import { toast } from "sonner";
 
 const navItems = [
@@ -38,6 +38,7 @@ export default function BatchDetail() {
   const [modules, setModules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [promotingId, setPromotingId] = useState(null);
+  const [demotingId, setDemotingId] = useState(null);
 
   // Module assignment state
   const [assignedModules, setAssignedModules] = useState(new Set());
@@ -163,6 +164,22 @@ export default function BatchDetail() {
       toast.error(err?.response?.data?.detail || "Failed to promote");
     } finally {
       setPromotingId(null);
+    }
+  };
+
+  const demote = async (t) => {
+    const next = (t.current_level ?? 0) - 1;
+    if (next < 0) { toast.info("Already at Level 0"); return; }
+    setDemotingId(t.id);
+    try {
+      await api.demoteTrainee(t.id);
+      toast.success(`${t.name} demoted to Level ${next}`);
+      const bRes = await api.getBatch(id);
+      setTrainees(bRes.trainees || []);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to demote");
+    } finally {
+      setDemotingId(null);
     }
   };
 
@@ -393,16 +410,28 @@ export default function BatchDetail() {
                         </span>
                       </td>
                       <td className="px-5 py-4 text-right">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={(t.current_level ?? 0) >= 3 || promotingId === t.id}
-                          onClick={() => promote(t)}
-                          className="rounded-full"
-                        >
-                          <TrendingUp className="h-3.5 w-3.5 mr-1" />
-                          Promote
-                        </Button>
+                        <div className="inline-flex items-center gap-1.5">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={(t.current_level ?? 0) >= 3 || promotingId === t.id}
+                            onClick={() => promote(t)}
+                            className="rounded-full"
+                          >
+                            <TrendingUp className="h-3.5 w-3.5 mr-1" />
+                            Promote
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={(t.current_level ?? 0) <= 0 || demotingId === t.id}
+                            onClick={() => demote(t)}
+                            className="rounded-full"
+                          >
+                            <TrendingDown className="h-3.5 w-3.5 mr-1" />
+                            Demote
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   );
