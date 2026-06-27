@@ -200,6 +200,7 @@ class BatchUpdate(BaseModel):
     start_date: Optional[str] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+    current_module: Optional[str] = None
 
 
 class BatchModulesIn(BaseModel):
