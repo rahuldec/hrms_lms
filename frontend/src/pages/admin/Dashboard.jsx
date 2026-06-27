@@ -2,10 +2,11 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { fetchAllAssignmentResults } from "@/lib/assignments";
+import { fetchSheetModules } from "@/lib/sheet";
 import AppShell from "@/components/AppShell";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Users, TrendingUp, CheckCircle2, PauseCircle, ChevronDown, ChevronUp, X, BarChart3, Layers } from "lucide-react";
+import { Users, TrendingUp, CheckCircle2, PauseCircle, ChevronDown, ChevronUp, X, BarChart3, Layers, Flag } from "lucide-react";
 import { toast } from "sonner";
 import {
   BarChart,
@@ -175,12 +176,27 @@ function ModuleComparisonTooltip({ active, payload, label }) {
 }
 
 // Read-only summary widget for the dashboard: for every batch, show which
-// modules are currently assigned (visible to trainees). Editing the
-// assignment itself happens on the Batch Detail page — this is just a quick
-// at-a-glance overview across all batches.
+// modules are currently assigned (visible to trainees) and which one the
+// batch is actively on. Editing assignments / current module happens on the
+// Batch Detail page — this is just a quick at-a-glance overview across all
+// batches.
 function BatchModulesPanel({ batches }) {
   const [loading, setLoading] = useState(true);
   const [assignmentsByBatch, setAssignmentsByBatch] = useState({});
+  const [moduleOrder, setModuleOrder] = useState([]);
+
+  // Curriculum order, fetched once, used so every batch lists its modules in
+  // the same sequence instead of whatever order they happened to be saved in.
+  useEffect(() => {
+    (async () => {
+      try {
+        const mods = await fetchSheetModules();
+        setModuleOrder((mods || []).map((m) => m.name));
+      } catch {
+        setModuleOrder([]);
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     if (batches.length === 0) {
@@ -211,6 +227,13 @@ function BatchModulesPanel({ batches }) {
     };
   }, [batches]);
 
+  const sortByCurriculum = (names) => {
+    if (moduleOrder.length === 0) return names;
+    return [...names].sort(
+      (a, b2) => moduleOrder.indexOf(a) - moduleOrder.indexOf(b2)
+    );
+  };
+
   return (
     <Card className="rounded-2xl border-neutral-200/80 p-7 mb-8">
       <div className="flex items-center gap-2 mb-1">
@@ -218,7 +241,7 @@ function BatchModulesPanel({ batches }) {
         <h2 className="text-xl font-semibold">Modules assigned per batch</h2>
       </div>
       <p className="text-sm text-neutral-500 mb-5">
-        What each batch currently sees. Manage assignments from a batch's detail page.
+        What each batch currently sees, in curriculum order. The flagged module is what the batch is currently on. Manage from a batch's detail page.
       </p>
 
       {batches.length === 0 ? (
@@ -230,7 +253,7 @@ function BatchModulesPanel({ batches }) {
       ) : (
         <div className="divide-y divide-neutral-100">
           {batches.map((b) => {
-            const names = assignmentsByBatch[b.id] || [];
+            const names = sortByCurriculum(assignmentsByBatch[b.id] || []);
             return (
               <div key={b.id} className="py-3.5 flex items-start gap-4 first:pt-0 last:pb-0">
                 <Link
@@ -243,16 +266,26 @@ function BatchModulesPanel({ batches }) {
                   {names.length === 0 ? (
                     <span className="text-sm text-neutral-400">No modules assigned</span>
                   ) : (
-                    names.map((name) => (
-                      <Badge
-                        key={name}
-                        variant="secondary"
-                        className="rounded-full font-medium"
-                        style={{ backgroundColor: "#FFF0E8", color: "#E05A2B" }}
-                      >
-                        {name}
-                      </Badge>
-                    ))
+                    names.map((name) => {
+                      const isCurrent = b.current_module === name;
+                      return (
+                        <Badge
+                          key={name}
+                          variant="secondary"
+                          className={`rounded-full font-medium inline-flex items-center gap-1 ${
+                            isCurrent ? "ring-1 ring-[#E05A2B]" : ""
+                          }`}
+                          style={
+                            isCurrent
+                              ? { backgroundColor: "#E05A2B", color: "white" }
+                              : { backgroundColor: "#FFF0E8", color: "#E05A2B" }
+                          }
+                        >
+                          {isCurrent && <Flag className="h-3 w-3" />}
+                          {name}
+                        </Badge>
+                      );
+                    })
                   )}
                 </div>
               </div>
