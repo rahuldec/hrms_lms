@@ -718,17 +718,22 @@ async def get_batch_modules(batch_id: str, _=Depends(require_admin)):
 async def set_batch_modules(batch_id: str, body: BatchModulesIn, _=Depends(require_admin)):
     """Replace the set of active modules for a batch with body.module_names."""
     async with httpx.AsyncClient(timeout=20) as cx:
-        # Deactivate everything for this batch first, then re-activate the selected set.
+        # Deactivate everything for this batch first, then re-activate the selected set
+        # in a single bulk upsert (was previously one POST per module name).
         await cx.patch(
             f"{REST}/batch_module_assignments?batch_id=eq.{batch_id}",
             headers=ADMIN_HEADERS,
             json={"is_active": False},
         )
-        for name in body.module_names:
+        if body.module_names:
+            rows = [
+                {"batch_id": batch_id, "module_name": name, "is_active": True}
+                for name in body.module_names
+            ]
             r = await cx.post(
                 f"{REST}/batch_module_assignments?on_conflict=batch_id,module_name",
                 headers={**ADMIN_HEADERS, "Prefer": "resolution=merge-duplicates"},
-                json={"batch_id": batch_id, "module_name": name, "is_active": True},
+                json=rows,
             )
             if r.status_code not in (200, 201, 204):
                 raise HTTPException(status_code=400, detail=r.text)
